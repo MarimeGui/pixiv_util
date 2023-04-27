@@ -13,11 +13,6 @@ pub async fn get(client: &Client, series_id: u64, page: u64) -> Result<Body> {
     let resp = req.send().await?;
     let status_code = resp.status();
 
-    // let data = resp.bytes().await?;
-    // let mut file = File::create("response_page2.json").await?;
-    // file.write_all(&data).await?;
-    // unimplemented!();
-
     let root = resp.json::<Root>().await?;
 
     if root.error {
