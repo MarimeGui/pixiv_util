@@ -2,7 +2,7 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Body>> {
+pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Page>> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/illust/{}/pages?lang=en",
         illust_id
@@ -28,12 +28,12 @@ pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Body>> {
 pub struct Root {
     pub error: bool,
     pub message: String,
-    pub body: Vec<Body>,
+    pub body: Vec<Page>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Body {
+pub struct Page {
     pub urls: Urls, // TODO: Check if this varies with the size of the image
     pub width: usize,
     pub height: usize,

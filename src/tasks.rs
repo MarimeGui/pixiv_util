@@ -7,7 +7,14 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-pub async fn dl_series(client: &Client, series_id: u64) -> Result<()> {
+use crate::FolderPolicy;
+
+pub async fn dl_series(
+    client: &Client,
+    series_id: u64,
+    output_folder: Option<PathBuf>,
+    folder_policy: FolderPolicy,
+) -> Result<()> {
     let mut page_index: u64 = 1;
     let mut illusts = BTreeMap::new();
 
@@ -32,9 +39,10 @@ pub async fn dl_series(client: &Client, series_id: u64) -> Result<()> {
     for illust in illusts {
         let client = client.clone();
         let illust_id = illust.parse()?;
-        tasks.push(tokio::spawn(
-            async move { dl_illust(&client, illust_id).await },
-        ));
+        let output_folder = output_folder.clone();
+        tasks.push(tokio::spawn(async move {
+            dl_illust(&client, illust_id, output_folder, folder_policy).await
+        }));
     }
 
     for task in tasks {
@@ -46,12 +54,31 @@ pub async fn dl_series(client: &Client, series_id: u64) -> Result<()> {
 
 // TODO: When Downloading series, being able to choose between putting all files in the same folder or have everything in a separate folder
 
-pub async fn dl_illust(client: &Client, illust_id: u64) -> Result<()> {
+pub async fn dl_illust(
+    client: &Client,
+    illust_id: u64,
+    output_folder: Option<PathBuf>,
+    folder_policy: FolderPolicy,
+) -> Result<()> {
     let pages = crate::api_calls::illust::get(client, illust_id).await?;
 
-    let in_folder = pages.len() > 1;
+    let in_folder = match folder_policy {
+        FolderPolicy::AlwaysCreate => true,
+        FolderPolicy::NeverCreate => false,
+        FolderPolicy::Auto => pages.len() > 1,
+    };
+
+    // Use path if provided, otherwise use current folder
+    let mut save_path = if let Some(o) = output_folder {
+        o
+    } else {
+        PathBuf::new()
+    };
+
+    // If multiple pages, put everything in folder
     if in_folder {
         create_dir_all(illust_id.to_string()).await?;
+        save_path.push(illust_id.to_string());
     }
 
     let mut downloads = Vec::new();
@@ -67,18 +94,14 @@ pub async fn dl_illust(client: &Client, illust_id: u64) -> Result<()> {
             }
         };
 
-        let mut save_path = PathBuf::new();
-
-        // If multiple pages, put everything in folder
-        if in_folder {
-            save_path.push(illust_id.to_string());
-        }
-
+        // Append filename
+        let mut save_path = save_path.clone();
         save_path.push(filename);
 
         // Make the query
         let req = client.get(url);
 
+        // Perform download
         downloads.push(tokio::spawn(dl_image_to_disk(save_path, req)));
     }
 

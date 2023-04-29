@@ -2,8 +2,10 @@ mod api_calls;
 mod gen_http_client;
 mod tasks;
 
+use std::path::PathBuf;
+
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand, ValueEnum};
 use gen_http_client::{make_client, make_headers};
 
 use crate::tasks::{dl_illust, dl_series};
@@ -30,11 +32,16 @@ enum ModeSubcommands {
     /// Download some illusts
     Download {
         /// Use this cookie instead of the pre-configured one (if any)
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "COOKIE")]
         cookie_override: Option<String>,
-        /// Check if the destination folder already has some of the illusts that are about to be downloaded and if so, don't download them again
-        #[arg(short, long, default_value_t = false)]
-        incremental: bool,
+        /// Check if a folder already has some of the illusts that are about to be downloaded and if so, don't download them again
+        #[arg(short, long, value_name = "FOLDER")]
+        incremental: Option<PathBuf>,
+        /// Where the newly downloaded files will go
+        #[arg(short, long)]
+        output_folder: Option<PathBuf>,
+        #[arg(short, long, value_enum, default_value_t = FolderPolicy::AlwaysCreate, value_name = "POLICY")]
+        folder_policy: FolderPolicy,
         #[command(subcommand)]
         mode: DownloadModesSubcommands,
     },
@@ -46,7 +53,7 @@ enum ModeSubcommands {
     },
 }
 
-#[derive(Parser, Debug)]
+#[derive(Subcommand, Debug)]
 enum DownloadModesSubcommands {
     /// Download a single illust
     Illust {
@@ -61,12 +68,22 @@ enum DownloadModesSubcommands {
     UserLikes { user_id: u64 },
 }
 
-#[derive(Parser, Debug)]
+#[derive(Subcommand, Debug)]
 enum CookieSubcommands {
     /// Set a cookie
     Set { cookie: String },
     /// Get the cookie
     Get,
+}
+
+#[derive(ValueEnum, Debug, Copy, Clone)]
+pub enum FolderPolicy {
+    /// In provided output_folder, always create a subfolder per illust (named with work ID) and put all images from this illust in it.
+    AlwaysCreate,
+    /// Always save all images directly to output_folder
+    NeverCreate,
+    /// If illust only contains one page, save directly to output_folder. Otherwise, create a subfolder. (Not recommended when downloading multiple illusts)
+    Auto,
 }
 
 #[tokio::main]
@@ -77,17 +94,19 @@ async fn main() -> Result<()> {
         ModeSubcommands::Download {
             cookie_override,
             incremental,
+            output_folder,
+            folder_policy,
             mode,
         } => {
             let client = make_client(make_headers(cookie_override.as_deref())?)?;
             match mode {
                 DownloadModesSubcommands::Illust { illust_id } => {
                     println!("Downloading illust ID {}", illust_id);
-                    dl_illust(&client, illust_id).await?;
+                    dl_illust(&client, illust_id, output_folder, folder_policy).await?;
                 }
                 DownloadModesSubcommands::Series { series_id } => {
                     println!("Downloading series ID {}", series_id);
-                    dl_series(&client, series_id).await?;
+                    dl_series(&client, series_id, output_folder, folder_policy).await?;
                 }
                 _ => unimplemented!("Can only download single illusts for now"),
             }
