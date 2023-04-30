@@ -5,6 +5,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::de_id;
+
 pub async fn get(client: &Client, series_id: u64, page: u64) -> Result<Body> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/series/{}?p={}&lang=en",
@@ -151,7 +153,8 @@ pub struct Page {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IllustPos {
-    pub work_id: String, // TODO: Change this to u64 ? https://serde.rs/container-attrs.html
+    #[serde(deserialize_with = "de_id")]
+    pub work_id: u64,
     pub order: usize,
 }
 

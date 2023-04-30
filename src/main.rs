@@ -1,14 +1,16 @@
+mod abstractions;
 mod api_calls;
+mod download;
 mod gen_http_client;
-mod tasks;
+mod incremental;
 
 use std::path::PathBuf;
 
+use abstractions::{get_all_series_works, get_all_user_bookmarks};
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use download::dl_illust;
 use gen_http_client::{make_client, make_headers};
-
-use crate::tasks::{dl_illust, dl_series};
 
 // Print JSON option ?
 // All posts from a user with specific tags ?
@@ -53,29 +55,6 @@ enum ModeSubcommands {
     },
 }
 
-#[derive(Subcommand, Debug)]
-enum DownloadModesSubcommands {
-    /// Download a single illust
-    Illust {
-        /// ID of the illust to download
-        illust_id: u64,
-    },
-    /// Download a series
-    Series { series_id: u64 },
-    /// Download all posts from a user
-    UserPosts { user_id: u64 },
-    /// Download all posts liked by a user
-    UserLikes { user_id: u64 },
-}
-
-#[derive(Subcommand, Debug)]
-enum CookieSubcommands {
-    /// Set a cookie
-    Set { cookie: String },
-    /// Get the cookie
-    Get,
-}
-
 #[derive(ValueEnum, Debug, Copy, Clone)]
 pub enum FolderPolicy {
     /// In provided output_folder, always create a subfolder per illust (named with work ID) and put all images from this illust in it.
@@ -84,6 +63,26 @@ pub enum FolderPolicy {
     NeverCreate,
     /// If illust only contains one page, save directly to output_folder. Otherwise, create a subfolder. (Not recommended when downloading multiple illusts)
     Auto,
+}
+
+#[derive(Subcommand, Debug)]
+enum DownloadModesSubcommands {
+    /// Download a single illust
+    Individual { illust_ids: Vec<u64> },
+    /// Download a series
+    Series { series_id: u64 },
+    /// Download all posts from a user
+    UserPosts { user_id: u64 },
+    /// Download all posts liked/bookmarked by a user
+    UserBookmarks { user_id: u64 },
+}
+
+#[derive(Subcommand, Debug)]
+enum CookieSubcommands {
+    /// Set a cookie
+    Set { cookie: String },
+    /// Get the cookie
+    Get,
 }
 
 #[tokio::main]
@@ -98,17 +97,44 @@ async fn main() -> Result<()> {
             folder_policy,
             mode,
         } => {
+            // Make the HTTP client with correct headers
             let client = make_client(make_headers(cookie_override.as_deref())?)?;
+
+            // If incremental is active, list all files
+            // ...
+
+            // Closure for initiating downloads
+            let mut tasks = Vec::new();
+            let mut f = |illust_id: u64| {
+                // TODO: Check if we already have this illust downloaded
+                let client = client.clone();
+                let output_folder = output_folder.clone();
+                tasks.push(tokio::spawn(async move {
+                    dl_illust(&client, illust_id, output_folder, folder_policy).await
+                }));
+            };
+
+            // Run all tasks
             match mode {
-                DownloadModesSubcommands::Illust { illust_id } => {
-                    println!("Downloading illust ID {}", illust_id);
-                    dl_illust(&client, illust_id, output_folder, folder_policy).await?;
+                DownloadModesSubcommands::Individual { illust_ids } => {
+                    for illust_id in illust_ids {
+                        f(illust_id)
+                    }
                 }
                 DownloadModesSubcommands::Series { series_id } => {
-                    println!("Downloading series ID {}", series_id);
-                    dl_series(&client, series_id, output_folder, folder_policy).await?;
+                    get_all_series_works(&client, series_id, f).await?
                 }
-                _ => unimplemented!("Can only download single illusts for now"),
+                DownloadModesSubcommands::UserPosts { user_id } => {
+                    unimplemented!()
+                }
+                DownloadModesSubcommands::UserBookmarks { user_id } => {
+                    get_all_user_bookmarks(&client, user_id, f).await?;
+                }
+            }
+
+            // Check if every download went okay
+            for task in tasks {
+                task.await??
             }
         }
         _ => unimplemented!("Can only download for now"),
