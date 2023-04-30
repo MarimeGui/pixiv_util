@@ -13,6 +13,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use cookie_file::{get_cookie_file_path, get_cookie_from_file, set_cookie_to_file};
 use download::dl_illust;
 use gen_http_client::{make_client, make_headers};
+use incremental::is_illust_in_files;
+
+use crate::incremental::list_all_files;
 
 // Print JSON option ?
 // All posts from a user with specific tags ?
@@ -26,6 +29,7 @@ use gen_http_client::{make_client, make_headers};
 // Ignore errors while downloading mode
 // Try to immediately fail before initiating all tasks if an illust is unavailable for example
 // Stream DLs to disk ?
+// Make incremental matching a bit smarter
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -126,12 +130,21 @@ async fn main() -> Result<()> {
             let client = make_client(make_headers(cookie.as_deref())?)?;
 
             // If incremental is active, list all files
-            // ...
+            let file_list = if let Some(p) = incremental {
+                Some(list_all_files(p)?)
+            } else {
+                None
+            };
 
             // Closure for initiating downloads
             let mut tasks = Vec::new();
             let mut f = |illust_id: u64| {
-                // TODO: Check if we already have this illust downloaded
+                // If this ID is already found among files, don't download it
+                if let Some(l) = &file_list {
+                    if is_illust_in_files(&illust_id.to_string(), l) {
+                        return;
+                    }
+                }
                 let client = client.clone();
                 let output_folder = output_folder.clone();
                 tasks.push(tokio::spawn(async move {
