@@ -163,7 +163,13 @@ async fn main() -> Result<()> {
                     get_all_series_works(&client, series_id, f).await?
                 }
                 DownloadModesSubcommands::UserPosts { user_id } => {
-                    unimplemented!()
+                    let user_info = crate::api_calls::user_info::get(&client, user_id).await?;
+                    for illust_id in user_info.illusts {
+                        f(illust_id)
+                    }
+                    for illust_id in user_info.manga {
+                        f(illust_id)
+                    }
                 }
                 DownloadModesSubcommands::UserBookmarks { user_id } => {
                     get_all_user_bookmarks(&client, user_id, f).await?;
