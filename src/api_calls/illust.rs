@@ -34,7 +34,7 @@ pub struct Root {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Page {
-    pub urls: Urls, // TODO: Check if this varies with the size of the image
+    pub urls: Urls,
     pub width: usize,
     pub height: usize,
 }
@@ -42,7 +42,6 @@ pub struct Page {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Urls {
-    #[serde(rename = "thumb_mini")]
     pub thumb_mini: String,
     pub small: String,
     pub regular: String,

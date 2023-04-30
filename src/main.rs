@@ -1,35 +1,33 @@
 mod abstractions;
 mod api_calls;
-mod cookie_file;
+mod cookie_mgmt;
 mod download;
 mod gen_http_client;
 mod incremental;
 
 use std::path::PathBuf;
 
-use abstractions::{get_all_series_works, get_all_user_bookmarks};
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use cookie_file::{get_cookie_file_path, get_cookie_from_file, set_cookie_to_file};
+
+use abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts};
+use cookie_mgmt::{
+    get_cookie_file_path, get_cookie_from_file, retrieve_cookie, set_cookie_to_file,
+};
 use download::dl_illust;
 use gen_http_client::{make_client, make_headers};
-use incremental::is_illust_in_files;
+use incremental::{is_illust_in_files, list_all_files};
 
-use crate::incremental::list_all_files;
-
-// Print JSON option ?
-// All posts from a user with specific tags ?
-// Name folder after series or illust name (requires maybe having a formatting string system)
-// Move incremental and cookie to subcommands
-// Progress indicator showing dl speed, complete/remaining VS verbose showing all files downloaded
-// Novel and ugoira dl
-// Automatically update cookie with server answers ?
-// Check immediately if paths are correct
-// Better, friendlier errors (like cookie get when no cookie is set)
-// Ignore errors while downloading mode
-// Try to immediately fail before initiating all tasks if an illust is unavailable for example
-// Stream DLs to disk ?
-// Make incremental matching a bit smarter
+// TODO: Print JSON option ?
+// TODO: All posts from a user with specific tags ?
+// TODO: Name folder after series or illust name (requires maybe having a formatting string system)
+// TODO: Progress indicator showing dl speed, complete/remaining VS verbose showing all files downloaded
+// TODO: Novel and ugoira dl
+// TODO: Check immediately if paths are correct
+// TODO: Better, friendlier errors (like cookie get when no cookie is set)
+// TODO: Mode where we continue downloading even if there are errors
+// TODO: Somehow immediately fail before initiating all tasks if an illust is unavailable for example
+// TODO: Look into streams for Socket -> Disk DLs as well as for abstractions instead of a closure
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -117,14 +115,7 @@ async fn main() -> Result<()> {
             mode,
         } => {
             // Get a cookie, if any
-            let cookie = match cookie_override {
-                Some(c) => Some(c),
-                // TODO: This should be a bit smarter, like if the file is empty
-                None => match get_cookie_from_file().await {
-                    Ok(c) => Some(c),
-                    Err(_) => None,
-                },
-            };
+            let cookie = retrieve_cookie(cookie_override).await;
 
             // Make the HTTP client with correct headers
             let client = make_client(make_headers(cookie.as_deref())?)?;
@@ -141,6 +132,7 @@ async fn main() -> Result<()> {
             let mut f = |illust_id: u64| {
                 // If this ID is already found among files, don't download it
                 if let Some(l) = &file_list {
+                    // TODO: We are probably loosing a bit of performance by computing here
                     if is_illust_in_files(&illust_id.to_string(), l) {
                         return;
                     }
@@ -163,13 +155,7 @@ async fn main() -> Result<()> {
                     get_all_series_works(&client, series_id, f).await?
                 }
                 DownloadModesSubcommands::UserPosts { user_id } => {
-                    let user_info = crate::api_calls::user_info::get(&client, user_id).await?;
-                    for illust_id in user_info.illusts {
-                        f(illust_id)
-                    }
-                    for illust_id in user_info.manga {
-                        f(illust_id)
-                    }
+                    get_all_user_img_posts(&client, user_id, f).await?;
                 }
                 DownloadModesSubcommands::UserBookmarks { user_id } => {
                     get_all_user_bookmarks(&client, user_id, f).await?;

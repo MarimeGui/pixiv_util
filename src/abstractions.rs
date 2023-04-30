@@ -22,6 +22,22 @@ where
     Ok(())
 }
 
+pub async fn get_all_user_img_posts<F>(client: &Client, user_id: u64, mut f: F) -> Result<()>
+where
+    F: FnMut(u64),
+{
+    let user_info = crate::api_calls::user_info::get(client, user_id).await?;
+
+    for illust_id in user_info.illusts {
+        f(illust_id)
+    }
+    for illust_id in user_info.manga {
+        f(illust_id)
+    }
+
+    Ok(())
+}
+
 pub async fn get_all_series_works<F>(client: &Client, series_id: u64, mut f: F) -> Result<()>
 where
     F: FnMut(u64),

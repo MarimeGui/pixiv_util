@@ -2,6 +2,8 @@ use std::{fs::read_dir, path::PathBuf};
 
 use anyhow::Result;
 
+// TODO: This is not very smart or efficient
+
 pub fn list_all_files(path: PathBuf) -> Result<Vec<String>> {
     let mut paths = Vec::new();
 

@@ -41,7 +41,7 @@ pub struct Body {
     pub works: Vec<Work>,
     pub total: usize,
     // pub zone_config: ZoneConfig, // Seems to be mostly for ads
-    // pub extra_data: ExtraData,
+    pub extra_data: ExtraData,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

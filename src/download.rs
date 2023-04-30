@@ -40,6 +40,7 @@ pub async fn dl_illust(
 
     let mut downloads = Vec::new();
     for page in pages.iter() {
+        // TODO: Move filename extraction to future ? Might make it a tiny bit faster
         // Get the URL for this image
         let url = &page.urls.original;
 
