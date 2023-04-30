@@ -1,5 +1,6 @@
 mod abstractions;
 mod api_calls;
+mod cookie_file;
 mod download;
 mod gen_http_client;
 mod incremental;
@@ -9,15 +10,22 @@ use std::path::PathBuf;
 use abstractions::{get_all_series_works, get_all_user_bookmarks};
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use cookie_file::{get_cookie_file_path, get_cookie_from_file, set_cookie_to_file};
 use download::dl_illust;
 use gen_http_client::{make_client, make_headers};
 
 // Print JSON option ?
 // All posts from a user with specific tags ?
-// When downloading multiple illusts with multiple pages, choose between all files in the same folder or subfolders with names or ID
+// Name folder after series or illust name (requires maybe having a formatting string system)
 // Move incremental and cookie to subcommands
 // Progress indicator showing dl speed, complete/remaining VS verbose showing all files downloaded
 // Novel and ugoira dl
+// Automatically update cookie with server answers ?
+// Check immediately if paths are correct
+// Better, friendlier errors (like cookie get when no cookie is set)
+// Ignore errors while downloading mode
+// Try to immediately fail before initiating all tasks if an illust is unavailable for example
+// Stream DLs to disk ?
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -83,6 +91,8 @@ enum CookieSubcommands {
     Set { cookie: String },
     /// Get the cookie
     Get,
+    /// Prints the path to the cookie file
+    PrintPath,
 }
 
 #[tokio::main]
@@ -90,6 +100,11 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.subcommand {
+        ModeSubcommands::Cookie(s) => match s {
+            CookieSubcommands::Get => println!("{}", get_cookie_from_file().await?),
+            CookieSubcommands::Set { cookie } => set_cookie_to_file(&cookie).await?,
+            CookieSubcommands::PrintPath => println!("{}", get_cookie_file_path()?.display()),
+        },
         ModeSubcommands::Download {
             cookie_override,
             incremental,
@@ -97,8 +112,18 @@ async fn main() -> Result<()> {
             folder_policy,
             mode,
         } => {
+            // Get a cookie, if any
+            let cookie = match cookie_override {
+                Some(c) => Some(c),
+                // TODO: This should be a bit smarter, like if the file is empty
+                None => match get_cookie_from_file().await {
+                    Ok(c) => Some(c),
+                    Err(_) => None,
+                },
+            };
+
             // Make the HTTP client with correct headers
-            let client = make_client(make_headers(cookie_override.as_deref())?)?;
+            let client = make_client(make_headers(cookie.as_deref())?)?;
 
             // If incremental is active, list all files
             // ...
