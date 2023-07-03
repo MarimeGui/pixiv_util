@@ -40,13 +40,13 @@ pub struct Root {
 #[serde(rename_all = "camelCase")]
 pub struct Body {
     // pub tag_translation: HashMap<String, HashMap<String, String>>, // TODO: Leave this field out for now as response switches between an array and a map
-    pub thumbnails: Thumbnails,
-    pub illust_series: Vec<RelatedSeries>,
-    pub requests: Vec<Value>,
-    pub users: Vec<User>,
+    // pub thumbnails: Thumbnails,
+    // pub illust_series: Vec<RelatedSeries>,
+    // pub requests: Vec<Value>,
+    // pub users: Vec<User>,
     pub page: Page,
-    pub extra_data: ExtraData,
-    pub zone_config: ZoneConfig,
+    // pub extra_data: ExtraData,
+    // pub zone_config: ZoneConfig,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
