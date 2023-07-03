@@ -7,7 +7,90 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::FolderPolicy;
+use crate::{
+    abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts},
+    gen_http_client::{make_client, make_headers},
+    incremental::{is_illust_in_files, list_all_files},
+    user_mgmt::{get_user_id, retrieve_cookie},
+    DownloadModesSubcommands, DownloadParameters, FolderPolicy,
+};
+
+// -------
+
+pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
+    // Get a cookie, if any
+    let cookie = match params.cookie_override {
+        Some(c) => Some(c),
+        None => retrieve_cookie(params.user_override).await?,
+    };
+
+    // Make the HTTP client with correct headers
+    let client = make_client(make_headers(cookie.as_deref())?)?;
+
+    // If incremental is active, list all files
+    let file_list = if let Some(p) = params.incremental {
+        Some(list_all_files(p)?)
+    } else {
+        None
+    };
+
+    // Closure for initiating downloads
+    let mut tasks = Vec::new();
+    let mut f = |illust_id: u64| {
+        // If this ID is already found among files, don't download it
+        if let Some(l) = &file_list {
+            // TODO: We are probably loosing a bit of performance by computing here
+            if is_illust_in_files(&illust_id.to_string(), l) {
+                return;
+            }
+        }
+        let client = client.clone();
+        let output_folder = params.output_folder.clone();
+        tasks.push(tokio::spawn(async move {
+            dl_illust(&client, illust_id, output_folder, params.folder_policy).await
+        }));
+    };
+
+    // Run all tasks
+    match params.mode {
+        DownloadModesSubcommands::Individual { illust_ids } => {
+            for illust_id in illust_ids {
+                f(illust_id)
+            }
+        }
+        DownloadModesSubcommands::Series { series_id } => {
+            get_all_series_works(&client, series_id, f).await?
+        }
+        DownloadModesSubcommands::UserPosts { user_id } => {
+            get_all_user_img_posts(&client, user_id, f).await?;
+        }
+        DownloadModesSubcommands::UserBookmarks { user_id } => {
+            // Get user id to use for downloads
+            let id = if let Some(i) = user_id {
+                // Specified directly by command line
+                i
+            } else if let Some(c) = cookie {
+                if let Some(i) = get_user_id(&c) {
+                    // Extracted from the cookie
+                    i
+                } else {
+                    return Err(anyhow::anyhow!("Couldn't get user id from cookie !"));
+                }
+            } else {
+                return Err(anyhow::anyhow!("No user ID specified !"));
+            };
+
+            get_all_user_bookmarks(&client, id, f).await?;
+        }
+    }
+
+    // Check if every download went okay
+    for task in tasks {
+        task.await??;
+    }
+
+    Ok(())
+}
 
 // -------
 

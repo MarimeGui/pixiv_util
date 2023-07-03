@@ -1,24 +1,19 @@
 mod abstractions;
 mod api_calls;
-mod cookie_mgmt;
 mod download;
+mod find_not_bookmarked;
 mod gen_http_client;
 mod incremental;
+mod user_mgmt;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
-use abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts};
-use cookie_mgmt::{
-    get_cookie_file_path, get_cookie_from_file, retrieve_cookie, set_cookie_to_file,
-};
-use download::dl_illust;
-use gen_http_client::{make_client, make_headers};
-use incremental::{is_illust_in_files, list_all_files};
-
-use crate::cookie_mgmt::get_user_id;
+use download::do_download_subcommand;
+use find_not_bookmarked::do_fnb_subcommand;
+use user_mgmt::do_users_subcommand;
 
 // TODO: Print JSON option ?
 // TODO: All posts from a user with specific tags ?
@@ -41,38 +36,55 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum ModeSubcommands {
-    /// Configure a user cookie to use for accessing limited content
+    /// Configure users for accessing restricted content
     #[command(subcommand)]
-    Cookie(CookieSubcommands),
+    Users(UsersSubcommands),
     /// Download some illusts
-    Download {
-        /// Use this cookie instead of the pre-configured one (if any)
-        #[arg(short, long, value_name = "COOKIE")]
-        cookie_override: Option<String>,
-        /// Check if a folder already has some of the illusts that are about to be downloaded and if so, don't download them again
-        #[arg(short, long, value_name = "FOLDER")]
-        incremental: Option<PathBuf>,
-        /// Where the newly downloaded files will go
-        #[arg(short, long)]
-        output_folder: Option<PathBuf>,
-        #[arg(short, long, value_enum, default_value_t = FolderPolicy::AlwaysCreate, value_name = "POLICY")]
-        folder_policy: FolderPolicy,
-        #[command(subcommand)]
-        mode: DownloadModesSubcommands,
-    },
+    Download(DownloadParameters),
     /// Find all illusts on disk that haven't been bookmarked/liked
-    FindNotBookmarked {
-        /// ID of the user to check against
-        user_id: u64,
-        /// Folder containing the illusts
-        folder: PathBuf,
-        /// Use this cookie instead of the pre-configured one (if any)
-        #[arg(short, long, value_name = "COOKIE")]
-        cookie_override: Option<String>,
-        /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
-        #[arg(short, long, default_value_t = false)]
-        ignore_missing: bool,
-    },
+    FindNotBookmarked(FNBParameters),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum UsersSubcommands {
+    /// Add a new user with their cookie, along with a name for identification
+    AddUser { cookie: String, name: String },
+    /// Remove a user
+    RemoveUser { name: String },
+    /// Print the cookie for a user
+    PrintCookie { name: String },
+    /// Sets a user as default when downloading
+    SetDefault { name: String },
+    /// Print the default user
+    GetDefault,
+    /// Set no default, i.e. specify which user to use everytime
+    RemoveDefault,
+    /// List all users
+    ListUsers,
+    /// Print the Pixiv ID for a user
+    GetPixivID { name: String },
+    /// Print the path to the database file for users
+    PrintPath,
+}
+
+#[derive(Parser, Debug)]
+pub struct DownloadParameters {
+    /// Directly specify a cookie for use over everything else
+    #[arg(short, long, value_name = "COOKIE")]
+    cookie_override: Option<String>,
+    /// Use a specific user for this download. If this isn't specified, the default user will be used.
+    #[arg(short, long, value_name = "USER")]
+    user_override: Option<String>,
+    /// Check if a folder already has some of the illusts that are about to be downloaded and if so, don't download them again
+    #[arg(short, long, value_name = "FOLDER")]
+    incremental: Option<PathBuf>,
+    /// Where the newly downloaded files will go
+    #[arg(short, long)]
+    output_folder: Option<PathBuf>,
+    #[arg(short, long, value_enum, default_value_t = FolderPolicy::NeverCreate, value_name = "POLICY")]
+    folder_policy: FolderPolicy,
+    #[command(subcommand)]
+    mode: DownloadModesSubcommands,
 }
 
 #[derive(ValueEnum, Debug, Copy, Clone)]
@@ -93,18 +105,22 @@ enum DownloadModesSubcommands {
     Series { series_id: u64 },
     /// Download all posts from a user
     UserPosts { user_id: u64 },
-    /// Download all posts liked/bookmarked by a user
-    UserBookmarks { user_id: u64 },
+    /// Download all posts liked/bookmarked by a user. If the ID is not specified, will download the current user's
+    UserBookmarks { user_id: Option<u64> },
 }
 
-#[derive(Subcommand, Debug)]
-enum CookieSubcommands {
-    /// Set a cookie
-    Set { cookie: String },
-    /// Get the cookie
-    Get,
-    /// Prints the path to the cookie file
-    PrintPath,
+#[derive(Parser, Debug)]
+pub struct FNBParameters {
+    /// ID of the user to check against
+    user_id: u64,
+    /// Folder containing the illusts
+    folder: PathBuf,
+    /// Use this cookie instead of the pre-configured one (if any)
+    #[arg(short, long, value_name = "COOKIE")]
+    cookie_override: Option<String>,
+    /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
+    #[arg(short, long, default_value_t = false)]
+    ignore_missing: bool,
 }
 
 #[tokio::main]
@@ -112,97 +128,8 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.subcommand {
-        ModeSubcommands::Cookie(s) => match s {
-            CookieSubcommands::Get => println!("{}", get_cookie_from_file().await?),
-            CookieSubcommands::Set { cookie } => set_cookie_to_file(&cookie).await?,
-            CookieSubcommands::PrintPath => println!("{}", get_cookie_file_path()?.display()),
-        },
-        ModeSubcommands::Download {
-            cookie_override,
-            incremental,
-            output_folder,
-            folder_policy,
-            mode,
-        } => {
-            // Get a cookie, if any
-            let cookie = retrieve_cookie(cookie_override).await;
-
-            // Make the HTTP client with correct headers
-            let client = make_client(make_headers(cookie.as_deref())?)?;
-
-            // If incremental is active, list all files
-            let file_list = if let Some(p) = incremental {
-                Some(list_all_files(p)?)
-            } else {
-                None
-            };
-
-            // Closure for initiating downloads
-            let mut tasks = Vec::new();
-            let mut f = |illust_id: u64| {
-                // If this ID is already found among files, don't download it
-                if let Some(l) = &file_list {
-                    // TODO: We are probably loosing a bit of performance by computing here
-                    if is_illust_in_files(&illust_id.to_string(), l) {
-                        return;
-                    }
-                }
-                let client = client.clone();
-                let output_folder = output_folder.clone();
-                tasks.push(tokio::spawn(async move {
-                    dl_illust(&client, illust_id, output_folder, folder_policy).await
-                }));
-            };
-
-            // Run all tasks
-            match mode {
-                DownloadModesSubcommands::Individual { illust_ids } => {
-                    for illust_id in illust_ids {
-                        f(illust_id)
-                    }
-                }
-                DownloadModesSubcommands::Series { series_id } => {
-                    get_all_series_works(&client, series_id, f).await?
-                }
-                DownloadModesSubcommands::UserPosts { user_id } => {
-                    get_all_user_img_posts(&client, user_id, f).await?;
-                }
-                DownloadModesSubcommands::UserBookmarks { user_id } => {
-                    get_all_user_bookmarks(&client, user_id, f).await?;
-                }
-            }
-
-            // Check if every download went okay
-            for task in tasks {
-                task.await??
-            }
-        }
-        ModeSubcommands::FindNotBookmarked {
-            user_id,
-            folder,
-            cookie_override,
-            ignore_missing,
-        } => {
-            let cookie = retrieve_cookie(cookie_override).await;
-            let client = make_client(make_headers(cookie.as_deref())?)?;
-
-            let files = list_all_files(folder)?;
-
-            if let Some(c) = cookie {
-                println!("{:?}", get_user_id(&c));
-            }
-
-            unimplemented!()
-
-            // Transform file names into u64 IDs
-
-            // Get all bookmarked IDs
-
-            // Compare files / bookmarks
-
-            // Print illusts not bookmarked
-        }
+        ModeSubcommands::Users(s) => do_users_subcommand(s).await,
+        ModeSubcommands::Download(p) => do_download_subcommand(p).await,
+        ModeSubcommands::FindNotBookmarked(p) => do_fnb_subcommand(p).await,
     }
-
-    Ok(())
 }
