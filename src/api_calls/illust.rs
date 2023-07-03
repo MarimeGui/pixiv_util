@@ -42,7 +42,7 @@ pub struct Page {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Urls {
-    pub thumb_mini: String,
+    pub thumb_mini: Option<String>,
     pub small: String,
     pub regular: String,
     pub original: String,

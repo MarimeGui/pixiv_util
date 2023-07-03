@@ -18,6 +18,8 @@ use download::dl_illust;
 use gen_http_client::{make_client, make_headers};
 use incremental::{is_illust_in_files, list_all_files};
 
+use crate::cookie_mgmt::get_user_id;
+
 // TODO: Print JSON option ?
 // TODO: All posts from a user with specific tags ?
 // TODO: Name folder after series or illust name (requires maybe having a formatting string system)
@@ -27,7 +29,8 @@ use incremental::{is_illust_in_files, list_all_files};
 // TODO: Better, friendlier errors (like cookie get when no cookie is set)
 // TODO: Mode where we continue downloading even if there are errors
 // TODO: Somehow immediately fail before initiating all tasks if an illust is unavailable for example
-// TODO: Look into streams for Socket -> Disk DLs as well as for abstractions instead of a closure
+// TODO: If incremental is specified but without a path, use same path as output folder
+// TODO: Some kind of double-clickable file for automatically downloading new images (part of a series for example)
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -57,9 +60,16 @@ enum ModeSubcommands {
         #[command(subcommand)]
         mode: DownloadModesSubcommands,
     },
-    /// Find all illusts on disk that haven't been liked
-    FindNotLiked {
-        /// If an illust is now publicly unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
+    /// Find all illusts on disk that haven't been bookmarked/liked
+    FindNotBookmarked {
+        /// ID of the user to check against
+        user_id: u64,
+        /// Folder containing the illusts
+        folder: PathBuf,
+        /// Use this cookie instead of the pre-configured one (if any)
+        #[arg(short, long, value_name = "COOKIE")]
+        cookie_override: Option<String>,
+        /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
         #[arg(short, long, default_value_t = false)]
         ignore_missing: bool,
     },
@@ -167,7 +177,31 @@ async fn main() -> Result<()> {
                 task.await??
             }
         }
-        _ => unimplemented!("Can only download for now"),
+        ModeSubcommands::FindNotBookmarked {
+            user_id,
+            folder,
+            cookie_override,
+            ignore_missing,
+        } => {
+            let cookie = retrieve_cookie(cookie_override).await;
+            let client = make_client(make_headers(cookie.as_deref())?)?;
+
+            let files = list_all_files(folder)?;
+
+            if let Some(c) = cookie {
+                println!("{:?}", get_user_id(&c));
+            }
+
+            unimplemented!()
+
+            // Transform file names into u64 IDs
+
+            // Get all bookmarked IDs
+
+            // Compare files / bookmarks
+
+            // Print illusts not bookmarked
+        }
     }
 
     Ok(())

@@ -11,6 +11,7 @@ where
         let body = crate::api_calls::user_bookmarks::get(client, user_id, page * 100, 100).await?;
         page += 1;
         for work in &body.works {
+            // TODO: Might be possible to spawn tasks instead of just calling the closure here
             f(work.id)
         }
         // If answer contained less than a 100 works, we've reached the end

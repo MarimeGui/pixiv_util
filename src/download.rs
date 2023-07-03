@@ -72,6 +72,7 @@ pub async fn dl_illust(
 }
 
 async fn dl_image_to_disk(save_path: PathBuf, req: RequestBuilder) -> Result<()> {
+    // TODO: There might be ways to receive data and immediately write it to disk. Would probably reduce memory usage but that's it
     let resp = req.send().await?;
     resp.error_for_status_ref()?;
     let data = resp.bytes().await?;

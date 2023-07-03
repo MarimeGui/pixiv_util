@@ -56,3 +56,28 @@ pub async fn retrieve_cookie(cookie_override: Option<String>) -> Option<String> 
         },
     }
 }
+
+// State of the art programming
+pub fn get_user_id(cookie: &str) -> Option<u64> {
+    for element in cookie.split("; ").collect::<Vec<&str>>() {
+        if let Some((key, value)) = element.split_once('=') {
+            if key == "__utmv" {
+                if let Some((_, useful)) = value.split_once('|') {
+                    for inner in useful.split('^').collect::<Vec<&str>>() {
+                        let sub = inner.split('=').collect::<Vec<&str>>();
+                        if let Some(sk) = sub.get(1) {
+                            if *sk == "user_id" {
+                                if let Some(vk) = sub.get(2) {
+                                    if let Ok(id) = vk.parse() {
+                                        return Some(id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
