@@ -8,7 +8,7 @@ mod user_mgmt;
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use download::do_download_subcommand;
@@ -26,6 +26,7 @@ use user_mgmt::do_users_subcommand;
 // TODO: Somehow immediately fail before initiating all tasks if an illust is unavailable for example
 // TODO: If incremental is specified but without a path, use same path as output folder
 // TODO: Some kind of double-clickable file for automatically downloading new images (part of a series for example)
+// TODO: Cache for user bookmarks
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -100,7 +101,10 @@ pub enum FolderPolicy {
 #[derive(Subcommand, Debug)]
 enum DownloadModesSubcommands {
     /// Download a single illust
-    Individual { illust_ids: Vec<u64> },
+    Individual { 
+        #[arg(value_parser = parse_illust_id)]
+        illust_ids: Vec<u64> 
+    },
     /// Download a series
     Series { series_id: u64 },
     /// Download all posts from a user
@@ -121,6 +125,26 @@ pub struct FNBParameters {
     /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
     #[arg(short, long, default_value_t = false)]
     ignore_missing: bool,
+}
+
+fn parse_illust_id(s: &str) -> Result<u64> {
+    // Is a straight id
+    if let Ok(v) = s.parse() {
+        return Ok(v)
+    }
+
+    // Is a URL
+    if let Some(part) = s.split_once("artworks/") {
+        let id_s = match part.1.split_once("#") {
+            Some((s, _)) => s,
+            None => part.1,
+        };
+        if let Ok(v) = id_s.parse() {
+            return Ok(v)
+        }
+    }
+
+    return Err(anyhow!("cannot recognize illust id"))
 }
 
 #[tokio::main]
