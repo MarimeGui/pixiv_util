@@ -14,7 +14,7 @@ where
             // TODO: Might be possible to spawn tasks instead of just calling the closure here
             if !f(work.id) {
                 // Stop here if we have found an illust that we already have. This works because most recent bookmarks are received first
-                break 'o
+                break 'o;
             }
         }
         // If answer contained less than a 100 works, we've reached the end
