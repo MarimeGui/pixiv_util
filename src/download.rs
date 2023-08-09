@@ -45,7 +45,9 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
         if let Some(l) = &file_list {
             // TODO: We are probably loosing a bit of performance by computing here
             if is_illust_in_files(&illust_id.to_string(), l) {
-                return;
+                // If we already have this illust, signal that this does not need to be downloaded
+                // If this is reached and fast incremental is disabled, this will return true and signal to continue
+                return params.disable_fast_incremental;
             }
         }
         let client = client.clone();
@@ -53,13 +55,14 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
         tasks.push(tokio::spawn(async move {
             dl_illust(&client, illust_id, save_path, params.directory_policy).await
         }));
+        true
     };
 
     // Run all tasks
     match params.mode {
         DownloadModesSubcommands::Individual { illust_ids } => {
             for illust_id in illust_ids {
-                f(illust_id)
+                f(illust_id);
             }
         }
         DownloadModesSubcommands::Series { series_id } => {

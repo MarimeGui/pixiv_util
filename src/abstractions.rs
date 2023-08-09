@@ -3,16 +3,19 @@ use reqwest::Client;
 
 pub async fn get_all_user_bookmarks<F>(client: &Client, user_id: u64, mut f: F) -> Result<()>
 where
-    F: FnMut(u64),
+    F: FnMut(u64) -> bool,
 {
     let mut page = 0;
 
-    loop {
+    'o: loop {
         let body = crate::api_calls::user_bookmarks::get(client, user_id, page * 100, 100).await?;
         page += 1;
         for work in &body.works {
             // TODO: Might be possible to spawn tasks instead of just calling the closure here
-            f(work.id)
+            if !f(work.id) {
+                // Stop here if we have found an illust that we already have. This works because most recent bookmarks are received first
+                break 'o
+            }
         }
         // If answer contained less than a 100 works, we've reached the end
         if body.works.len() < 100 {
@@ -25,15 +28,16 @@ where
 
 pub async fn get_all_user_img_posts<F>(client: &Client, user_id: u64, mut f: F) -> Result<()>
 where
-    F: FnMut(u64),
+    F: FnMut(u64) -> bool,
 {
     let user_info = crate::api_calls::user_info::get(client, user_id).await?;
 
+    // Ignore bool indication as we already have all posts in one call with this API
     for illust_id in user_info.illusts {
-        f(illust_id)
+        f(illust_id);
     }
     for illust_id in user_info.manga {
-        f(illust_id)
+        f(illust_id);
     }
 
     Ok(())
@@ -41,7 +45,7 @@ where
 
 pub async fn get_all_series_works<F>(client: &Client, series_id: u64, mut f: F) -> Result<()>
 where
-    F: FnMut(u64),
+    F: FnMut(u64) -> bool,
 {
     let mut page_index: u64 = 1;
     let mut total = 0;
@@ -54,7 +58,8 @@ where
 
         for series in body.page.series {
             // TODO: series.order might be important
-            f(series.work_id)
+            // TODO: Need to check if works are most recent first in order to enable fast incremental
+            f(series.work_id);
         }
 
         if total == body.page.total {
