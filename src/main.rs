@@ -14,9 +14,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use download::do_download_subcommand;
+use download_novel::do_download_novel_subcommand;
 use find_not_bookmarked::do_fnb_subcommand;
 use user_mgmt::do_users_subcommand;
-use download_novel::do_download_novel_subcommand;
 
 use parsers::*;
 

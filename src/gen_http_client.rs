@@ -3,8 +3,9 @@ use reqwest::{
     Client, ClientBuilder,
 };
 
-// Clippy is not happy with this, saying I should use a static with lazy_static in this case...
+#[allow(clippy::declare_interior_mutable_const)]
 const MY_USER_AGENT: HeaderValue = HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36");
+#[allow(clippy::declare_interior_mutable_const)]
 const MY_REFERER: HeaderValue = HeaderValue::from_static("https://www.pixiv.net/");
 
 pub fn make_headers(
