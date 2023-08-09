@@ -30,15 +30,6 @@ fn get_db_file_path() -> Result<PathBuf> {
 
 // ---------- Cookie string manipulations
 
-fn sanitize(cookie: &str) -> &str {
-    // TODO: Remove useless fields
-    if let Some(s) = cookie.strip_prefix("Cookie: ") {
-        s
-    } else {
-        cookie
-    }
-}
-
 // State of the art programming
 pub fn get_user_id(cookie: &str) -> Option<u64> {
     for element in cookie.split("; ").collect::<Vec<&str>>() {
@@ -135,21 +126,18 @@ pub async fn do_users_subcommand(s: UsersSubcommands) -> Result<()> {
                 _ => {
                     match s {
                         // Requires modifying the DB
-                        UsersSubcommands::AddUser {
-                            cookie,
-                            username: name,
-                        } => {
-                            db.users.insert(name, sanitize(&cookie).to_string());
+                        UsersSubcommands::AddUser { cookie, username } => {
+                            db.users.insert(username, cookie);
                         }
-                        UsersSubcommands::RemoveUser { username: name } => {
+                        UsersSubcommands::RemoveUser { username } => {
                             let mut delete_default = false;
                             if let Some(d) = &db.default_user {
-                                delete_default = d == &name
+                                delete_default = d == &username
                             }
                             if delete_default {
                                 db.default_user = None;
                             }
-                            match db.users.remove(&name) {
+                            match db.users.remove(&username) {
                                 Some(_) => {}
                                 None => return Err(anyhow::anyhow!("No such user in database !")),
                             }

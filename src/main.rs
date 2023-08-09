@@ -39,7 +39,11 @@ enum ModeSubcommands {
 #[derive(Subcommand, Debug)]
 pub enum UsersSubcommands {
     /// Add a new user with their cookie, along with a name for identification
-    AddUser { cookie: String, username: String },
+    AddUser {
+        #[arg(value_parser = sanitize_cookie)]
+        cookie: String,
+        username: String,
+    },
     /// Remove a user
     RemoveUser { username: String },
     /// Print the cookie for a user
@@ -61,7 +65,7 @@ pub enum UsersSubcommands {
 #[derive(Parser, Debug)]
 pub struct DownloadParameters {
     /// Directly specify a cookie for use over everything else
-    #[arg(short, long, value_name = "COOKIE")]
+    #[arg(short, long, value_name = "COOKIE", value_parser = sanitize_cookie)]
     cookie_override: Option<String>,
     /// Use a specific user for this download. If this isn't specified, the default user will be used.
     #[arg(short, long, value_name = "USER")]
@@ -96,9 +100,15 @@ enum DownloadModesSubcommands {
         illust_ids: Vec<u64>,
     },
     /// Download a series
-    Series { series_id: u64 },
+    Series {
+        #[arg(value_parser = parse_series_id)]
+        series_id: u64,
+    },
     /// Download all posts from a user
-    UserPosts { user_id: u64 },
+    UserPosts {
+        #[arg(value_parser = parse_user_id)]
+        user_id: u64,
+    },
     /// Download all posts liked/bookmarked by a user. If the ID is not specified, will download the current user's
     UserBookmarks { user_id: Option<u64> },
 }
@@ -110,7 +120,7 @@ pub struct FNBParameters {
     /// Directory containing the illusts
     dir: PathBuf,
     /// Use this cookie instead of the pre-configured one (if any)
-    #[arg(short, long, value_name = "COOKIE")]
+    #[arg(short, long, value_name = "COOKIE", value_parser = sanitize_cookie)]
     cookie_override: Option<String>,
     /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
     #[arg(short, long, default_value_t = false)]
