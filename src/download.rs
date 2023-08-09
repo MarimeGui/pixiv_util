@@ -12,7 +12,7 @@ use crate::{
     gen_http_client::{make_client, make_headers},
     incremental::{is_illust_in_files, list_all_files},
     user_mgmt::{get_user_id, retrieve_cookie},
-    DownloadModesSubcommands, DownloadParameters, FolderPolicy,
+    DirectoryPolicy, DownloadModesSubcommands, DownloadParameters,
 };
 
 // -------
@@ -45,9 +45,9 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
             }
         }
         let client = client.clone();
-        let output_folder = params.output_folder.clone();
+        let output_dir = params.output_directory.clone();
         tasks.push(tokio::spawn(async move {
-            dl_illust(&client, illust_id, output_folder, params.folder_policy).await
+            dl_illust(&client, illust_id, output_dir, params.directory_policy).await
         }));
     };
 
@@ -97,26 +97,26 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
 pub async fn dl_illust(
     client: &Client,
     illust_id: u64,
-    output_folder: Option<PathBuf>,
-    folder_policy: FolderPolicy,
+    output_directory: Option<PathBuf>,
+    directory_policy: DirectoryPolicy,
 ) -> Result<()> {
     let pages = crate::api_calls::illust::get(client, illust_id).await?;
 
-    let in_folder = match folder_policy {
-        FolderPolicy::AlwaysCreate => true,
-        FolderPolicy::NeverCreate => false,
-        FolderPolicy::Auto => pages.len() > 1,
+    let in_dir = match directory_policy {
+        DirectoryPolicy::AlwaysCreate => true,
+        DirectoryPolicy::NeverCreate => false,
+        DirectoryPolicy::CreateIfMultiple => pages.len() > 1,
     };
 
-    // Use path if provided, otherwise use current folder
-    let mut save_path = if let Some(o) = output_folder {
+    // Use path if provided, otherwise use current dir
+    let mut save_path = if let Some(o) = output_directory {
         o
     } else {
         PathBuf::new()
     };
 
-    // If multiple pages, put everything in folder
-    if in_folder {
+    // If multiple pages, put everything in dir
+    if in_dir {
         create_dir_all(illust_id.to_string()).await?;
         save_path.push(illust_id.to_string());
     }

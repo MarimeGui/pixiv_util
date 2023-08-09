@@ -20,7 +20,7 @@ const COOKIE_FILE_NAME: &str = "pixiv_util_user_db.json";
 fn get_db_file_path() -> Result<PathBuf> {
     let mut config = match config_dir() {
         Some(c) => c,
-        _ => return Err(anyhow::anyhow!("No suitable configuration folder !")),
+        _ => return Err(anyhow::anyhow!("No suitable configuration directory !")),
     };
 
     config.push(COOKIE_FILE_NAME);
@@ -114,7 +114,7 @@ pub async fn do_users_subcommand(s: UsersSubcommands) -> Result<()> {
                         println!("{}", name);
                     }
                 }
-                UsersSubcommands::PrintCookie { name } => match db.users.get(&name) {
+                UsersSubcommands::PrintCookie { username: name } => match db.users.get(&name) {
                     Some(c) => println!("{}", c),
                     None => return Err(anyhow::anyhow!("No such user in database !")),
                 },
@@ -125,7 +125,7 @@ pub async fn do_users_subcommand(s: UsersSubcommands) -> Result<()> {
                         println!("No default user.")
                     }
                 }
-                UsersSubcommands::GetPixivID { name } => match db.users.get(&name) {
+                UsersSubcommands::GetPixivID { username: name } => match db.users.get(&name) {
                     Some(c) => match get_user_id(c) {
                         Some(i) => println!("{}", i),
                         None => return Err(anyhow::anyhow!("Couldn't get user id from cookie !")),
@@ -135,10 +135,13 @@ pub async fn do_users_subcommand(s: UsersSubcommands) -> Result<()> {
                 _ => {
                     match s {
                         // Requires modifying the DB
-                        UsersSubcommands::AddUser { cookie, name } => {
+                        UsersSubcommands::AddUser {
+                            cookie,
+                            username: name,
+                        } => {
                             db.users.insert(name, sanitize(&cookie).to_string());
                         }
-                        UsersSubcommands::RemoveUser { name } => {
+                        UsersSubcommands::RemoveUser { username: name } => {
                             let mut delete_default = false;
                             if let Some(d) = &db.default_user {
                                 delete_default = d == &name
@@ -151,7 +154,7 @@ pub async fn do_users_subcommand(s: UsersSubcommands) -> Result<()> {
                                 None => return Err(anyhow::anyhow!("No such user in database !")),
                             }
                         }
-                        UsersSubcommands::SetDefault { name } => {
+                        UsersSubcommands::SetDefault { username: name } => {
                             if db.users.get(&name).is_some() {
                                 db.default_user = Some(name)
                             } else {
