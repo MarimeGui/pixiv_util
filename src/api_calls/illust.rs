@@ -1,26 +1,26 @@
-use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Page>> {
+use super::ApiError;
+
+pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Page>, ApiError> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/illust/{}/pages?lang=en",
         illust_id
     ));
-    let resp = req.send().await?;
+    let resp = req.send().await.map_err(ApiError::Network)?;
     let status_code = resp.status();
 
-    let pages = resp.json::<Root>().await?;
+    let root = resp.json::<Root>().await.map_err(ApiError::Parse)?;
 
-    if pages.error {
-        return Err(anyhow::anyhow!(
-            "Server returned: \"{}\" ({})",
-            pages.message,
-            status_code
-        ));
+    if root.error {
+        return Err(ApiError::Application {
+            message: root.message,
+            status_code,
+        });
     }
 
-    Ok(pages.body)
+    Ok(root.body)
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

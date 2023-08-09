@@ -1,27 +1,25 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::de_id;
+use super::{de_id, ApiError};
 
-pub async fn get(client: &Client, user_id: u64, offset: u64, limit: u64) -> Result<Body> {
+pub async fn get(client: &Client, user_id: u64, offset: u64, limit: u64) -> Result<Body, ApiError> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/user/{}/illusts/bookmarks?tag=&offset={}&limit={}&rest=show&lang=en",
         user_id, offset, limit,
     ));
-    let resp = req.send().await?;
+    let resp = req.send().await.map_err(ApiError::Network)?;
     let status_code = resp.status();
 
-    let root = resp.json::<Root>().await?;
+    let root = resp.json::<Root>().await.map_err(ApiError::Parse)?;
 
     if root.error {
-        return Err(anyhow::anyhow!(
-            "Server returned: \"{}\" ({})",
-            root.message,
-            status_code
-        ));
+        return Err(ApiError::Application {
+            message: root.message,
+            status_code,
+        });
     }
 
     Ok(root.body)

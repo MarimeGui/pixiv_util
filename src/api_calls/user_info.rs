@@ -5,24 +5,23 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{de_id, de_id_map};
+use super::{de_id, de_id_map, ApiError};
 
-pub async fn get(client: &Client, user_id: u64) -> Result<Body> {
+pub async fn get(client: &Client, user_id: u64) -> Result<Body, ApiError> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/user/{}/profile/all",
         user_id,
     ));
-    let resp = req.send().await?;
+    let resp = req.send().await.map_err(ApiError::Network)?;
     let status_code = resp.status();
 
-    let root = resp.json::<Root>().await?;
+    let root = resp.json::<Root>().await.map_err(ApiError::Parse)?;
 
     if root.error {
-        return Err(anyhow::anyhow!(
-            "Server returned: \"{}\" ({})",
-            root.message,
-            status_code
-        ));
+        return Err(ApiError::Application {
+            message: root.message,
+            status_code,
+        });
     }
 
     Ok(root.body)

@@ -1,5 +1,7 @@
+use reqwest::StatusCode;
 use serde::{de, Deserialize, Deserializer};
 use serde_json::Value;
+use thiserror::Error;
 
 pub mod illust;
 pub mod series;
@@ -10,6 +12,19 @@ pub mod user_info;
 // Best website ever
 
 // TODO: Macro for get fns ?
+
+#[derive(Error, Debug)]
+pub enum ApiError {
+    #[error("problem with http/network")]
+    Network(#[source] reqwest::Error),
+    #[error("couldn't parse received json")]
+    Parse(#[source] reqwest::Error),
+    #[error("\"{message}\" ({status_code})")]
+    Application {
+        message: String,
+        status_code: StatusCode,
+    },
+}
 
 // https://www.reddit.com/r/rust/comments/fcz4yb/how_do_you_deserialize_strings_integers_to_float/
 fn de_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
