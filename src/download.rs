@@ -28,9 +28,12 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
     // Make the HTTP client with correct headers
     let client = make_client(make_headers(cookie.as_deref())?)?;
 
+    // If there is a specified path, use it, otherwise use blank for current dir
+    let output_dir = params.output_directory.unwrap_or_default();
+
     // If incremental is active, list all files
-    let file_list = if let Some(p) = params.incremental {
-        Some(list_all_files(p)?)
+    let file_list = if let Some(o) = params.incremental {
+        Some(list_all_files(o.unwrap_or(output_dir.clone()))?)
     } else {
         None
     };
@@ -46,9 +49,9 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
             }
         }
         let client = client.clone();
-        let output_dir = params.output_directory.clone();
+        let save_path = output_dir.clone();
         tasks.push(tokio::spawn(async move {
-            dl_illust(&client, illust_id, output_dir, params.directory_policy).await
+            dl_illust(&client, illust_id, save_path, params.directory_policy).await
         }));
     };
 
@@ -98,7 +101,7 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
 pub async fn dl_illust(
     client: &Client,
     illust_id: u64,
-    output_directory: Option<PathBuf>,
+    mut save_path: PathBuf,
     directory_policy: DirectoryPolicy,
 ) -> Result<()> {
     let pages = crate::api_calls::illust::get(client, illust_id).await?;
@@ -107,13 +110,6 @@ pub async fn dl_illust(
         DirectoryPolicy::AlwaysCreate => true,
         DirectoryPolicy::NeverCreate => false,
         DirectoryPolicy::CreateIfMultiple => pages.len() > 1,
-    };
-
-    // Use path if provided, otherwise use current dir
-    let mut save_path = if let Some(o) = output_directory {
-        o
-    } else {
-        PathBuf::new()
     };
 
     // If multiple pages, put everything in dir

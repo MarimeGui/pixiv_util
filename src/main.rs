@@ -70,9 +70,9 @@ pub struct DownloadParameters {
     /// Use a specific user for this download. If this isn't specified, the default user will be used.
     #[arg(short, long, value_name = "USER")]
     user_override: Option<String>,
-    /// Check if a directory already has some of the illusts that are about to be downloaded and if so, don't download them again
+    /// Check if a directory already has some of the illusts that are about to be downloaded and if so, don't download them again. If option is specified but no path is given, will use same path as output
     #[arg(short, long, value_name = "DIR")]
-    incremental: Option<PathBuf>,
+    incremental: Option<Option<PathBuf>>,
     /// Where the newly downloaded files will go
     #[arg(short, long)]
     output_directory: Option<PathBuf>,
