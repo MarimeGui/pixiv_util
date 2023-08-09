@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ApiError;
 
-pub async fn get(client: &Client, novel_id: u64) -> Result<Vec<NovelInfo>, ApiError> {
+pub async fn get(client: &Client, novel_id: u64) -> Result<NovelInfo, ApiError> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/novel/{}?lang=en",
         novel_id
@@ -30,7 +30,7 @@ pub async fn get(client: &Client, novel_id: u64) -> Result<Vec<NovelInfo>, ApiEr
 pub struct Root {
     pub error: bool,
     pub message: String,
-    pub body: NovelInto,
+    pub body: NovelInfo,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
