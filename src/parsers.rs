@@ -8,7 +8,7 @@ pub fn parse_illust_id(s: &str) -> Result<u64> {
 
     // Is a URL
     if let Some(part) = s.split_once("artworks/") {
-        let id_s = match part.1.split_once("#") {
+        let id_s = match part.1.split_once('#') {
             Some((s, _)) => s,
             None => part.1,
         };
@@ -17,5 +17,5 @@ pub fn parse_illust_id(s: &str) -> Result<u64> {
         }
     }
 
-    return Err(anyhow!("cannot recognize illust id"));
+    Err(anyhow!("cannot recognize illust id"))
 }
