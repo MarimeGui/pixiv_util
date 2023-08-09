@@ -74,7 +74,7 @@ pub struct DownloadParameters {
     #[arg(short, long, value_name = "DIR")]
     incremental: Option<Option<PathBuf>>,
     /// By default and when available, stop checking with server early as soon as an illust was found on drive. Use this option if downloads seem incomplete
-    #[arg(short, long)]
+    #[arg(long)]
     disable_fast_incremental: bool,
     /// Where the newly downloaded files will go
     #[arg(short, long)]
