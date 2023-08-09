@@ -6,6 +6,7 @@ use tokio::{
     fs::{create_dir_all, File},
     io::AsyncWriteExt,
 };
+use tokio_stream::StreamExt;
 
 use crate::{
     abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts},
@@ -155,11 +156,15 @@ pub async fn dl_illust(
 }
 
 async fn dl_image_to_disk(save_path: PathBuf, req: RequestBuilder) -> Result<()> {
-    // TODO: There might be ways to receive data and immediately write it to disk. Would probably reduce memory usage but that's it
     let resp = req.send().await?;
     resp.error_for_status_ref()?;
-    let data = resp.bytes().await?;
+
     let mut file = File::create(save_path).await?;
-    file.write_all(&data).await?;
+    let mut stream = resp.bytes_stream();
+
+    while let Some(data) = stream.next().await {
+        file.write_all(&data?).await?
+    }
+
     Ok(())
 }
