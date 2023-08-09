@@ -1,6 +1,7 @@
 mod abstractions;
 mod api_calls;
 mod download;
+mod download_novel;
 mod find_not_bookmarked;
 mod gen_http_client;
 mod incremental;
@@ -15,6 +16,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use download::do_download_subcommand;
 use find_not_bookmarked::do_fnb_subcommand;
 use user_mgmt::do_users_subcommand;
+use download_novel::do_download_novel_subcommand;
 
 use parsers::*;
 
@@ -34,6 +36,8 @@ enum ModeSubcommands {
     Download(DownloadParameters),
     /// Find all illusts on disk that haven't been bookmarked/liked
     FindNotBookmarked(FNBParameters),
+    /// Download a novel
+    DownloadNovel(DownloadNovelParameters),
 }
 
 #[derive(Subcommand, Debug)]
@@ -130,6 +134,20 @@ pub struct FNBParameters {
     ignore_missing: bool,
 }
 
+#[derive(Parser, Debug)]
+pub struct DownloadNovelParameters {
+    /// Directly specify a cookie for use over everything else
+    #[arg(short, long, value_name = "COOKIE", value_parser = sanitize_cookie)]
+    cookie_override: Option<String>,
+    /// Use a specific user for this download. If this isn't specified, the default user will be used.
+    #[arg(short, long, value_name = "USER")]
+    user_override: Option<String>,
+    /// ID of the novel to download
+    novel_id: u64,
+    /// Where the text file will be
+    destination_file: PathBuf,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -138,5 +156,6 @@ async fn main() -> Result<()> {
         ModeSubcommands::Users(s) => do_users_subcommand(s).await,
         ModeSubcommands::Download(p) => do_download_subcommand(p).await,
         ModeSubcommands::FindNotBookmarked(p) => do_fnb_subcommand(p).await,
+        ModeSubcommands::DownloadNovel(n) => do_download_novel_subcommand(n).await,
     }
 }
