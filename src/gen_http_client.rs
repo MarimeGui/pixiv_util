@@ -21,5 +21,8 @@ pub fn make_headers(
 }
 
 pub fn make_client(headers: HeaderMap) -> reqwest::Result<Client> {
-    ClientBuilder::new().default_headers(headers).build()
+    ClientBuilder::new()
+        .default_headers(headers)
+        .gzip(true)
+        .build()
 }
