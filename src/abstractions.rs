@@ -10,6 +10,10 @@ where
     // Request first page separately to get the number of bookmarks
     let first = crate::api_calls::user_bookmarks::get(client, user_id, 0, ILLUSTS_PER_PAGE).await?;
     for work in first.works {
+        if work.is_masked {
+            // Ignore illusts that have been removed
+            continue
+        }
         if !f(work.id) {
             // Stop here if we have found an illust that we already have. This works because most recent bookmarks are received first
             return Ok(());
@@ -21,6 +25,9 @@ where
     for page in 1..nb_pages {
         let body = crate::api_calls::user_bookmarks::get(client, user_id, page * ILLUSTS_PER_PAGE, ILLUSTS_PER_PAGE).await?;
         for work in body.works {
+            if work.is_masked {
+                continue
+            }
             if !f(work.id) {
                 return Ok(());
             }
