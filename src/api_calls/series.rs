@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use super::{de_id, ApiError};
 
-pub async fn get(client: &Client, series_id: u64, page: u64) -> Result<Body, ApiError> {
+pub async fn get(client: &Client, series_id: u64, page: usize) -> Result<Body, ApiError> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/series/{}?p={}&lang=en",
         series_id, page,

@@ -5,21 +5,25 @@ pub async fn get_all_user_bookmarks<F>(client: &Client, user_id: u64, mut f: F) 
 where
     F: FnMut(u64) -> bool,
 {
-    let mut page = 0;
+    const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
-    'o: loop {
-        let body = crate::api_calls::user_bookmarks::get(client, user_id, page * 100, 100).await?;
-        page += 1;
-        for work in &body.works {
-            // TODO: Might be possible to spawn tasks instead of just calling the closure here
-            if !f(work.id) {
-                // Stop here if we have found an illust that we already have. This works because most recent bookmarks are received first
-                break 'o;
-            }
+    // Request first page separately to get the number of bookmarks
+    let first = crate::api_calls::user_bookmarks::get(client, user_id, 0, ILLUSTS_PER_PAGE).await?;
+    for work in first.works {
+        if !f(work.id) {
+            // Stop here if we have found an illust that we already have. This works because most recent bookmarks are received first
+            return Ok(());
         }
-        // If answer contained less than a 100 works, we've reached the end
-        if body.works.len() < 100 {
-            break;
+    }
+
+    // Iterate over every page
+    let nb_pages = (first.total / ILLUSTS_PER_PAGE) + usize::from(first.total % ILLUSTS_PER_PAGE != 0);
+    for page in 1..nb_pages {
+        let body = crate::api_calls::user_bookmarks::get(client, user_id, page * ILLUSTS_PER_PAGE, ILLUSTS_PER_PAGE).await?;
+        for work in body.works {
+            if !f(work.id) {
+                return Ok(());
+            }
         }
     }
 
@@ -47,7 +51,7 @@ pub async fn get_all_series_works<F>(client: &Client, series_id: u64, mut f: F) 
 where
     F: FnMut(u64) -> bool,
 {
-    let mut page_index: u64 = 1;
+    let mut page_index = 1;
     let mut total = 0;
 
     loop {
