@@ -6,6 +6,7 @@ use thiserror::Error;
 pub mod illust;
 pub mod novel;
 pub mod series;
+pub mod ugoira_meta;
 pub mod user_bookmarks;
 pub mod user_info;
 
