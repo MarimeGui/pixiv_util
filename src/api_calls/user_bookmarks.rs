@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{de_id, ApiError};
 
-pub async fn get(client: &Client, user_id: u64, offset: usize, limit: usize) -> Result<Body, ApiError> {
+pub async fn get(
+    client: &Client,
+    user_id: u64,
+    offset: usize,
+    limit: usize,
+) -> Result<Body, ApiError> {
     let req = client.get(format!(
         "https://www.pixiv.net/ajax/user/{}/illusts/bookmarks?tag=&offset={}&limit={}&rest=show&lang=en",
         user_id, offset, limit,
