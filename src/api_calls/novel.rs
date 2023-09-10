@@ -39,7 +39,7 @@ pub struct NovelInfo {
     pub content: String,
     pub create_date: String,
     pub description: String,
-    pub text_embedded_images: HashMap<u64, EmbeddedImage>,
+    pub text_embedded_images: Option<HashMap<u64, EmbeddedImage>>,
     pub title: String,
     pub upload_date: String,
 }
