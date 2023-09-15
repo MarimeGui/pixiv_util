@@ -10,24 +10,16 @@ use tokio_stream::StreamExt;
 
 use crate::{
     abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts},
-    gen_http_client::{make_client, make_headers},
     incremental::{is_illust_in_files, list_all_files},
-    user_mgmt::{get_user_id, retrieve_cookie},
-    DirectoryPolicy, DownloadModesSubcommands, DownloadParameters,
+    user_mgmt::get_user_id,
+    DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
 };
 
-// -------
-
-pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
-    // Get a cookie, if any
-    let cookie = match params.cookie_override {
-        Some(c) => Some(c),
-        None => retrieve_cookie(params.user_override).await?,
-    };
-
-    // Make the HTTP client with correct headers
-    let client = make_client(make_headers(cookie.as_deref())?)?;
-
+pub async fn download_illust(
+    params: DownloadIllustParameters,
+    client: Client,
+    cookie: Option<String>,
+) -> Result<()> {
     // If there is a specified path, use it, otherwise use blank for current dir
     let output_dir = params.output_directory.unwrap_or_default();
 
@@ -60,18 +52,18 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
 
     // Run all tasks
     match params.mode {
-        DownloadModesSubcommands::Individual { illust_ids } => {
+        DownloadIllustModes::Individual { illust_ids } => {
             for illust_id in illust_ids {
                 f(illust_id);
             }
         }
-        DownloadModesSubcommands::Series { series_id } => {
+        DownloadIllustModes::Series { series_id } => {
             get_all_series_works(&client, series_id, f).await?
         }
-        DownloadModesSubcommands::UserPosts { user_id } => {
+        DownloadIllustModes::UserPosts { user_id } => {
             get_all_user_img_posts(&client, user_id, f).await?;
         }
-        DownloadModesSubcommands::UserBookmarks { user_id } => {
+        DownloadIllustModes::UserBookmarks { user_id } => {
             // Get user id to use for downloads
             let id = if let Some(i) = user_id {
                 // Specified directly by command line
@@ -98,8 +90,6 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
 
     Ok(())
 }
-
-// -------
 
 const MAX_RETRIES: usize = 3;
 const TIMEOUT: u64 = 120;

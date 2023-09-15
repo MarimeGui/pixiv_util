@@ -1,7 +1,6 @@
 mod abstractions;
 mod api_calls;
 mod download;
-mod download_novel;
 mod find_not_bookmarked;
 mod gen_http_client;
 mod incremental;
@@ -14,31 +13,26 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use download::do_download_subcommand;
-use download_novel::do_download_novel_subcommand;
 use find_not_bookmarked::do_fnb_subcommand;
 use user_mgmt::do_users_subcommand;
 
 use parsers::*;
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[command(subcommand)]
-    subcommand: ModeSubcommands,
-}
+// -----
 
 #[derive(Parser, Debug)]
-enum ModeSubcommands {
+#[command(author, version, about, long_about = None)]
+enum Args {
     /// Configure users for accessing restricted content
     #[command(subcommand)]
     Users(UsersSubcommands),
-    /// Download some illusts
+    /// Download something !
     Download(DownloadParameters),
     /// Find all illusts on disk that haven't been bookmarked/liked
     FindNotBookmarked(FNBParameters),
-    /// Download a novel
-    DownloadNovel(DownloadNovelParameters),
 }
+
+// -----
 
 #[derive(Subcommand, Debug)]
 pub enum UsersSubcommands {
@@ -66,6 +60,8 @@ pub enum UsersSubcommands {
     PrintPath,
 }
 
+// -----
+
 #[derive(Parser, Debug)]
 pub struct DownloadParameters {
     /// Directly specify a cookie for use over everything else
@@ -74,6 +70,19 @@ pub struct DownloadParameters {
     /// Use a specific user for this download. If this isn't specified, the default user will be used.
     #[arg(short, long, value_name = "USER")]
     user_override: Option<String>,
+    /// What kind of media we are downloading
+    #[command(subcommand)]
+    media_params: DownloadMediaParameters,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DownloadMediaParameters {
+    Illust(DownloadIllustParameters),
+    Novel(DownloadNovelParameters),
+}
+
+#[derive(Parser, Debug)]
+pub struct DownloadIllustParameters {
     /// Check if a directory already has some of the illusts that are about to be downloaded and if so, don't download them again. If option is specified but no path is given, will use same path as output
     #[arg(short, long, value_name = "DIR")]
     incremental: Option<Option<PathBuf>>,
@@ -86,21 +95,11 @@ pub struct DownloadParameters {
     #[arg(short, long, value_enum, default_value_t = DirectoryPolicy::NeverCreate, value_name = "POLICY")]
     directory_policy: DirectoryPolicy,
     #[command(subcommand)]
-    mode: DownloadModesSubcommands,
-}
-
-#[derive(ValueEnum, Debug, Copy, Clone)]
-pub enum DirectoryPolicy {
-    /// In provided output directory, always create a subdir per illust (named with work ID) and put all images from this illust in it.
-    AlwaysCreate,
-    /// Always save all images directly to output directory
-    NeverCreate,
-    /// If illust only contains one page, save directly to output directory. Otherwise, create a subdir. (Not recommended when downloading multiple illusts)
-    CreateIfMultiple,
+    mode: DownloadIllustModes,
 }
 
 #[derive(Subcommand, Debug)]
-enum DownloadModesSubcommands {
+enum DownloadIllustModes {
     /// Download a single illust
     Individual {
         #[arg(value_parser = parse_illust_id)]
@@ -121,20 +120,6 @@ enum DownloadModesSubcommands {
 }
 
 #[derive(Parser, Debug)]
-pub struct FNBParameters {
-    /// ID of the user to check against
-    user_id: u64,
-    /// Directory containing the illusts
-    dir: PathBuf,
-    /// Use this cookie instead of the pre-configured one (if any)
-    #[arg(short, long, value_name = "COOKIE", value_parser = sanitize_cookie)]
-    cookie_override: Option<String>,
-    /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
-    #[arg(short, long, default_value_t = false)]
-    ignore_missing: bool,
-}
-
-#[derive(Parser, Debug)]
 pub struct DownloadNovelParameters {
     /// Directly specify a cookie for use over everything else
     #[arg(short, long, value_name = "COOKIE", value_parser = sanitize_cookie)]
@@ -148,14 +133,41 @@ pub struct DownloadNovelParameters {
     destination_file: PathBuf,
 }
 
+#[derive(ValueEnum, Debug, Copy, Clone)]
+pub enum DirectoryPolicy {
+    /// In provided output directory, always create a subdir per illust (named with work ID) and put all images from this illust in it.
+    AlwaysCreate,
+    /// Always save all images directly to output directory
+    NeverCreate,
+    /// If illust only contains one page, save directly to output directory. Otherwise, create a subdir. (Not recommended when downloading multiple illusts)
+    CreateIfMultiple,
+}
+
+// -----
+
+#[derive(Parser, Debug)]
+pub struct FNBParameters {
+    /// ID of the user to check against
+    user_id: u64,
+    /// Directory containing the illusts
+    dir: PathBuf,
+    /// Use this cookie instead of the pre-configured one (if any)
+    #[arg(short, long, value_name = "COOKIE", value_parser = sanitize_cookie)]
+    cookie_override: Option<String>,
+    /// If an illust is now unavailable, don't list it in the output. Disabled by default as this makes this request a lot more expensive
+    #[arg(short, long, default_value_t = false)]
+    ignore_missing: bool,
+}
+
+// -----
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    match args.subcommand {
-        ModeSubcommands::Users(s) => do_users_subcommand(s).await,
-        ModeSubcommands::Download(p) => do_download_subcommand(p).await,
-        ModeSubcommands::FindNotBookmarked(p) => do_fnb_subcommand(p).await,
-        ModeSubcommands::DownloadNovel(n) => do_download_novel_subcommand(n).await,
+    match args {
+        Args::Users(s) => do_users_subcommand(s).await,
+        Args::Download(p) => do_download_subcommand(p).await,
+        Args::FindNotBookmarked(p) => do_fnb_subcommand(p).await,
     }
 }
