@@ -3,7 +3,7 @@ use serde::{de, Deserialize, Deserializer};
 use serde_json::Value;
 use thiserror::Error;
 
-pub mod illust;
+pub mod illust_pages;
 pub mod novel;
 pub mod series;
 pub mod ugoira_meta;

@@ -37,8 +37,6 @@ pub struct Page {
     pub urls: Urls,
     pub width: usize,
     pub height: usize,
-    /// 1 for Illust, 2 for Ugoira
-    pub illust_type: usize,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

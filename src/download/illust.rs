@@ -107,7 +107,7 @@ pub async fn dl_illust(
     mut save_path: PathBuf,
     directory_policy: DirectoryPolicy,
 ) -> Result<()> {
-    let pages = crate::api_calls::illust::get(client, illust_id).await?;
+    let pages = crate::api_calls::illust_pages::get(client, illust_id).await?;
 
     let in_dir = match directory_policy {
         DirectoryPolicy::AlwaysCreate => true,
