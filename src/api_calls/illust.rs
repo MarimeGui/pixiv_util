@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{de_id, ApiError};
 
-pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<IllustInfo>, ApiError> {
+pub async fn get(client: &Client, illust_id: u64) -> Result<IllustInfo, ApiError> {
     let req = client.get(format!("https://www.pixiv.net/ajax/illust/{}", illust_id));
     let resp = req.send().await.map_err(ApiError::Network)?;
     let status_code = resp.status();
@@ -25,7 +25,7 @@ pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<IllustInfo>, Api
 pub struct Root {
     pub error: bool,
     pub message: String,
-    pub body: Vec<IllustInfo>,
+    pub body: IllustInfo,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
