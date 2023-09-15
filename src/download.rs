@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use reqwest::{Client, RequestBuilder};
@@ -101,6 +101,16 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
 
 // -------
 
+const MAX_RETRIES: usize = 3;
+const TIMEOUT: u64 = 120;
+
+struct DownloadTask<T> {
+    url: String,
+    path: PathBuf,
+    tries: usize,
+    task: Option<T>,
+}
+
 pub async fn dl_illust(
     client: &Client,
     illust_id: u64,
@@ -121,17 +131,15 @@ pub async fn dl_illust(
         save_path.push(illust_id.to_string());
     }
 
-    let mut downloads = Vec::new();
-    for page in pages.iter() {
-        // TODO: Move filename extraction to future ? Might make it a tiny bit faster
-        // Get the URL for this image
-        let url = &page.urls.original;
+    let mut downloads = Vec::with_capacity(pages.len());
+    for page in pages.into_iter() {
+        let url = page.urls.original;
 
         // Extract filename
         let filename = {
             match url.rsplit('/').next() {
                 Some(p) => p,
-                None => url,
+                None => &url,
             }
         };
 
@@ -139,16 +147,64 @@ pub async fn dl_illust(
         let mut save_path = save_path.clone();
         save_path.push(filename);
 
-        // Make the query
-        let req = client.get(url);
-
-        // Perform download
-        downloads.push(tokio::spawn(dl_image_to_disk(save_path, req)));
+        downloads.push(DownloadTask {
+            url,
+            path: save_path,
+            tries: 0,
+            task: None,
+        })
     }
 
-    // Check if everything went okay
-    for task in downloads {
-        task.await??
+    // Check on every task, retry if necessary
+    loop {
+        let mut done = true;
+
+        for download in downloads.iter_mut() {
+            let initiate = match (download.tries, &mut download.task) {
+                // Hasn't yet started
+                (0, None) => true,
+                // Has completed already
+                (_, None) => false,
+                // Is undergoing
+                (current_tries, Some(j)) => match j.await {
+                    Ok(i) => match i {
+                        // We're done !
+                        Ok(_) => false,
+                        Err(e) => {
+                            if current_tries > MAX_RETRIES {
+                                // Tried too many times, let it go.
+                                eprintln!("    {}", e);
+                                false
+                            } else {
+                                // Try again !
+                                true
+                            }
+                        }
+                    },
+                    // JoinError, print error and don't try again.
+                    Err(e) => {
+                        eprintln!("    {}", e);
+                        false
+                    }
+                },
+            };
+
+            download.task = if initiate {
+                done = false;
+                download.tries += 1;
+                let req = client
+                    .get(&download.url)
+                    .timeout(Duration::from_secs(TIMEOUT));
+                let path_clone = download.path.clone();
+                Some(tokio::spawn(dl_image_to_disk(path_clone, req)))
+            } else {
+                None
+            };
+        }
+
+        if done {
+            break;
+        }
     }
 
     Ok(())
