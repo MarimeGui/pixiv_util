@@ -1,34 +1,14 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::ApiError;
+use super::{ApiError, Root};
 
 pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Page>, ApiError> {
-    let req = client.get(format!(
-        "https://www.pixiv.net/ajax/illust/{}/pages?lang=en",
-        illust_id
-    ));
-    let resp = req.send().await.map_err(ApiError::Network)?;
-    let status_code = resp.status();
-
-    let root = resp.json::<Root>().await.map_err(ApiError::Parse)?;
-
-    if root.error {
-        return Err(ApiError::Application {
-            message: root.message,
-            status_code,
-        });
-    }
-
-    Ok(root.body)
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Root {
-    pub error: bool,
-    pub message: String,
-    pub body: Vec<Page>,
+    Root::query(
+        client,
+        &format!("https://www.pixiv.net/ajax/illust/{}/pages", illust_id),
+    )
+    .await
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,5 +1,8 @@
-use reqwest::StatusCode;
-use serde::{de, Deserialize, Deserializer};
+use reqwest::{Client, StatusCode};
+use serde::{
+    de::{self, DeserializeOwned},
+    Deserialize, Deserializer, Serialize,
+};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -11,10 +14,36 @@ pub mod ugoira_meta;
 pub mod user_bookmarks;
 pub mod user_info;
 
-// https://transform.tools/json-to-rust-serde
-// Best website ever
+// -----
 
-// TODO: Macro for get fns ?
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Root<T> {
+    pub error: bool,
+    pub message: String,
+    pub body: T,
+}
+
+impl<T: Serialize + DeserializeOwned> Root<T> {
+    pub async fn query(client: &Client, url: &str) -> Result<T, ApiError> {
+        let req = client.get(url);
+        let resp = req.send().await.map_err(ApiError::Network)?;
+        let status_code = resp.status();
+
+        let root: Root<T> = resp.json().await.map_err(ApiError::Parse)?;
+
+        if root.error {
+            return Err(ApiError::Application {
+                message: root.message,
+                status_code,
+            });
+        }
+
+        Ok(root.body)
+    }
+}
+
+// -----
 
 #[derive(Error, Debug)]
 pub enum ApiError {
@@ -28,6 +57,8 @@ pub enum ApiError {
         status_code: StatusCode,
     },
 }
+
+// -----
 
 // https://www.reddit.com/r/rust/comments/fcz4yb/how_do_you_deserialize_strings_integers_to_float/
 fn de_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
