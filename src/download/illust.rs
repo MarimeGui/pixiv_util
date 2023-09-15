@@ -83,7 +83,7 @@ pub async fn download_illust(
         }
     }
 
-    // Check if every download went okay
+    // Check if every illust download went okay
     for task in tasks {
         task.await??;
     }
@@ -163,7 +163,7 @@ pub async fn dl_illust(
                         Err(e) => {
                             if current_tries > MAX_RETRIES {
                                 // Tried too many times, let it go.
-                                eprintln!("    {}", e);
+                                eprintln!("{}: {}", download.path.display(), e);
                                 false
                             } else {
                                 // Try again !
@@ -173,7 +173,7 @@ pub async fn dl_illust(
                     },
                     // JoinError, print error and don't try again.
                     Err(e) => {
-                        eprintln!("    {}", e);
+                        eprintln!("{}: {}", download.path.display(), e);
                         false
                     }
                 },
