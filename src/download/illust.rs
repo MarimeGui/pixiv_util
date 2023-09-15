@@ -39,7 +39,7 @@ pub async fn download_illust(
             if is_illust_in_files(&illust_id.to_string(), l) {
                 // If we already have this illust, signal that this does not need to be downloaded
                 // If this is reached and fast incremental is disabled, this will return true and signal to continue
-                return params.disable_fast_incremental;
+                return !params.fast_incremental;
             }
         }
         let client = client.clone();
