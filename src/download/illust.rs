@@ -11,6 +11,7 @@ use tokio_stream::StreamExt;
 use crate::{
     abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts},
     incremental::{is_illust_in_files, list_all_files},
+    update_file::create_update_file,
     user_mgmt::get_user_id,
     DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
 };
@@ -24,8 +25,8 @@ pub async fn download_illust(
     let output_dir = params.output_directory.unwrap_or_default();
 
     // If incremental is active, list all files
-    let file_list = if let Some(o) = params.incremental {
-        Some(list_all_files(o.unwrap_or(output_dir.clone()))?)
+    let file_list = if let Some(o) = &params.incremental {
+        Some(list_all_files(o.as_ref().unwrap_or(&output_dir))?)
     } else {
         None
     };
@@ -51,23 +52,23 @@ pub async fn download_illust(
     };
 
     // Run all tasks
-    match params.mode {
+    match &params.mode {
         DownloadIllustModes::Individual { illust_ids } => {
             for illust_id in illust_ids {
-                f(illust_id);
+                f(*illust_id);
             }
         }
         DownloadIllustModes::Series { series_id } => {
-            get_all_series_works(&client, series_id, f).await?
+            get_all_series_works(&client, *series_id, f).await?
         }
         DownloadIllustModes::UserPosts { user_id } => {
-            get_all_user_img_posts(&client, user_id, f).await?;
+            get_all_user_img_posts(&client, *user_id, f).await?;
         }
         DownloadIllustModes::UserBookmarks { user_id } => {
             // Get user id to use for downloads
             let id = if let Some(i) = user_id {
                 // Specified directly by command line
-                i
+                *i
             } else if let Some(c) = cookie {
                 if let Some(i) = get_user_id(&c) {
                     // Extracted from the cookie
@@ -86,6 +87,17 @@ pub async fn download_illust(
     // Check if every illust download went okay
     for task in tasks {
         task.await??;
+    }
+
+    // Create an update file
+    if !params.no_update_file & params.incremental.is_none() {
+        match &params.mode {
+            // Ignore single illusts
+            DownloadIllustModes::Individual { illust_ids: _ } => {}
+            _ => {
+                create_update_file(&output_dir, &params.mode)?;
+            }
+        }
     }
 
     Ok(())

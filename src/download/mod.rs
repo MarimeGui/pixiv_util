@@ -1,5 +1,6 @@
 mod illust;
 mod novel;
+mod update;
 
 use anyhow::Result;
 
@@ -9,7 +10,7 @@ use crate::{
     DownloadMediaParameters, DownloadParameters,
 };
 
-use self::{illust::download_illust, novel::download_novel};
+use self::{illust::download_illust, novel::download_novel, update::download_updates};
 
 pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
     // Get a cookie, if any
@@ -24,5 +25,6 @@ pub async fn do_download_subcommand(params: DownloadParameters) -> Result<()> {
     match params.media_params {
         DownloadMediaParameters::Illust(i) => download_illust(i, client, cookie).await,
         DownloadMediaParameters::Novel(n) => download_novel(n, client).await,
+        DownloadMediaParameters::Update(u) => download_updates(u, client, cookie).await,
     }
 }

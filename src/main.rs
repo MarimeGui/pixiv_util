@@ -5,6 +5,7 @@ mod find_not_bookmarked;
 mod gen_http_client;
 mod incremental;
 mod parsers;
+mod update_file;
 mod user_mgmt;
 
 use std::path::PathBuf;
@@ -14,6 +15,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use download::do_download_subcommand;
 use find_not_bookmarked::do_fnb_subcommand;
+use serde::{Deserialize, Serialize};
+use update_file::do_create_update_file_subcommand;
 use user_mgmt::do_users_subcommand;
 
 use parsers::*;
@@ -30,6 +33,8 @@ enum Args {
     Download(DownloadParameters),
     /// Find all illusts on disk that haven't been bookmarked/liked
     FindNotBookmarked(FNBParameters),
+    /// Creates an update file if necessary. One should be created automatically when downloading normally
+    CreateUpdateFile(CreateUpdateFileParameters),
 }
 
 // -----
@@ -83,6 +88,8 @@ pub enum DownloadMediaParameters {
     Illust(DownloadIllustParameters),
     /// Download Novels
     Novel(DownloadNovelParameters),
+    /// Check for new media and download automatically new posts
+    Update(DownloadUpdateParameters),
 }
 
 #[derive(Parser, Debug)]
@@ -93,6 +100,9 @@ pub struct DownloadIllustParameters {
     /// When available, stop checking with server early as soon as an illust was found on drive. Use this option wisely
     #[arg(long)]
     fast_incremental: bool,
+    /// Do not create an update file for use with update functionality
+    #[arg(long)]
+    no_update_file: bool,
     /// Where the newly downloaded files will go. If not specified, will use working directory
     #[arg(short, long)]
     output_directory: Option<PathBuf>,
@@ -104,8 +114,18 @@ pub struct DownloadIllustParameters {
     mode: DownloadIllustModes,
 }
 
-#[derive(Subcommand, Debug)]
-enum DownloadIllustModes {
+#[derive(ValueEnum, Debug, Copy, Clone)]
+pub enum DirectoryPolicy {
+    /// In provided output directory, always create a subdir per illust (named with work ID) and put all images from this illust in it.
+    AlwaysCreate,
+    /// Always save all images directly to output directory
+    NeverCreate,
+    /// If illust only contains one page, save directly to output directory. Otherwise, create a subdir. (Not recommended when downloading multiple illusts)
+    CreateIfMultiple,
+}
+
+#[derive(Subcommand, Serialize, Deserialize, Debug)]
+pub enum DownloadIllustModes {
     /// Download a single illust
     Individual {
         #[arg(value_parser = parse_illust_id)]
@@ -139,14 +159,13 @@ pub struct DownloadNovelParameters {
     destination_file: PathBuf,
 }
 
-#[derive(ValueEnum, Debug, Copy, Clone)]
-pub enum DirectoryPolicy {
-    /// In provided output directory, always create a subdir per illust (named with work ID) and put all images from this illust in it.
-    AlwaysCreate,
-    /// Always save all images directly to output directory
-    NeverCreate,
-    /// If illust only contains one page, save directly to output directory. Otherwise, create a subdir. (Not recommended when downloading multiple illusts)
-    CreateIfMultiple,
+#[derive(Parser, Debug)]
+pub struct DownloadUpdateParameters {
+    /// When specified, go down all sub-directories and update everything
+    #[arg(short, long)]
+    recursive: bool,
+    /// Where we are updating. If omitted, uses current directory
+    directory: Option<PathBuf>,
 }
 
 // -----
@@ -167,6 +186,16 @@ pub struct FNBParameters {
 
 // -----
 
+#[derive(Parser, Debug)]
+pub struct CreateUpdateFileParameters {
+    /// What directory will contain the update file
+    output_directory: PathBuf,
+    #[command(subcommand)]
+    mode: DownloadIllustModes,
+}
+
+// -----
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -175,5 +204,6 @@ async fn main() -> Result<()> {
         Args::Users(s) => do_users_subcommand(s).await,
         Args::Download(p) => do_download_subcommand(p).await,
         Args::FindNotBookmarked(p) => do_fnb_subcommand(p).await,
+        Args::CreateUpdateFile(c) => do_create_update_file_subcommand(c),
     }
 }
