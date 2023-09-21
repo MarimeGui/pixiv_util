@@ -38,8 +38,10 @@ enum Args {
 pub enum UsersSubcommands {
     /// Add a new user with their cookie, along with a name for identification
     AddUser {
+        /// Cookie for this user. Can be pulled from a web browser-based session with dev tools
         #[arg(value_parser = sanitize_cookie)]
         cookie: String,
+        /// Name for identifying this user locally. It does not have to be the same as on the website, this is just for this program
         username: String,
     },
     /// Remove a user
@@ -50,13 +52,13 @@ pub enum UsersSubcommands {
     SetDefault { username: String },
     /// Print the default user
     GetDefault,
-    /// Set no default, i.e. specify which user to use everytime
+    /// Set no default, i.e. specify user everytime
     RemoveDefault,
     /// List all users
     ListUsers,
-    /// Print the Pixiv ID for a user
+    /// Print the Pixiv ID of a user
     GetPixivID { username: String },
-    /// Print the path to the database file for users
+    /// Print the path of the database file
     PrintPath,
 }
 
@@ -97,6 +99,7 @@ pub struct DownloadIllustParameters {
     /// Changes the directory creation behavior
     #[arg(short, long, value_enum, default_value_t = DirectoryPolicy::NeverCreate, value_name = "POLICY")]
     directory_policy: DirectoryPolicy,
+    /// What to download exactly
     #[command(subcommand)]
     mode: DownloadIllustModes,
 }
