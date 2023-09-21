@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ApiError, Root};
 
-pub async fn get(client: &Client, illust_id: u64) -> Result<Body, ApiError> {
+pub async fn _get(client: &Client, illust_id: u64) -> Result<Body, ApiError> {
     Root::query(
         client,
         &format!(

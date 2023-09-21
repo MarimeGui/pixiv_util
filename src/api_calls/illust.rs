@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{de_id, ApiError, Root};
 
-pub async fn get(client: &Client, illust_id: u64) -> Result<IllustInfo, ApiError> {
+pub async fn _get(client: &Client, illust_id: u64) -> Result<IllustInfo, ApiError> {
     Root::query(
         client,
         &format!("https://www.pixiv.net/ajax/illust/{}", illust_id),
