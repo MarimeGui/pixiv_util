@@ -77,7 +77,9 @@ pub struct DownloadParameters {
 
 #[derive(Subcommand, Debug)]
 pub enum DownloadMediaParameters {
+    /// Download Illusts or Manga
     Illust(DownloadIllustParameters),
+    /// Download Novels
     Novel(DownloadNovelParameters),
 }
 
@@ -89,9 +91,10 @@ pub struct DownloadIllustParameters {
     /// When available, stop checking with server early as soon as an illust was found on drive. Use this option wisely
     #[arg(long)]
     fast_incremental: bool,
-    /// Where the newly downloaded files will go
+    /// Where the newly downloaded files will go. If not specified, will use working directory
     #[arg(short, long)]
     output_directory: Option<PathBuf>,
+    /// Changes the directory creation behavior
     #[arg(short, long, value_enum, default_value_t = DirectoryPolicy::NeverCreate, value_name = "POLICY")]
     directory_policy: DirectoryPolicy,
     #[command(subcommand)]
