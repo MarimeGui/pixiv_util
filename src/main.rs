@@ -95,7 +95,7 @@ pub enum DownloadMediaParameters {
 #[derive(Parser, Debug)]
 pub struct DownloadIllustParameters {
     /// Check if a directory already has some of the illusts that are about to be downloaded and if so, don't download them again. If option is specified but no path is given, will use same path as output
-    #[arg(short, long, value_name = "DIR")]
+    #[arg(short, long, value_name = "DIR", require_equals = true)]
     incremental: Option<Option<PathBuf>>,
     /// When available, stop checking with server early as soon as an illust was found on drive. Use this option wisely
     #[arg(long)]

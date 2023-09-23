@@ -5,6 +5,15 @@ use anyhow::Result;
 // TODO: This is not very smart or efficient
 
 pub fn list_all_files(path: &Path) -> Result<Vec<String>> {
+    // If path is empty, treat it as current directory
+    list_all_files_inner(if path == Path::new("") {
+        Path::new(".")
+    } else {
+        path
+    })
+}
+
+fn list_all_files_inner(path: &Path) -> Result<Vec<String>> {
     let mut paths = Vec::new();
 
     let iterator = read_dir(path)?;
@@ -13,7 +22,7 @@ pub fn list_all_files(path: &Path) -> Result<Vec<String>> {
         if e.file_type()?.is_file() {
             paths.push(e.path().display().to_string());
         } else {
-            paths.extend_from_slice(&list_all_files(&e.path())?)
+            paths.extend_from_slice(&list_all_files_inner(&e.path())?)
         }
     }
 
