@@ -3,7 +3,7 @@ use serde::{
     de::{self, DeserializeOwned},
     Deserialize, Deserializer, Serialize,
 };
-use serde_json::Value;
+use serde_json::{from_slice, from_value, Value};
 use thiserror::Error;
 
 pub mod illust;
@@ -29,17 +29,33 @@ impl<T: Serialize + DeserializeOwned> Root<T> {
         let req = client.get(url);
         let resp = req.send().await.map_err(ApiError::Network)?;
         let status_code = resp.status();
+        let full = resp.bytes().await.map_err(ApiError::Network)?;
 
-        let root: Root<T> = resp.json().await.map_err(ApiError::Parse)?;
+        // Check for empty response
+        if full.is_empty() {
+            return Err(ApiError::EmptyResponse { status_code });
+        }
 
+        // Parse root first
+        let root: Root<Value> = from_slice(&full).map_err(ApiError::JSONParse)?;
+
+        // Check for application error
         if root.error {
-            return Err(ApiError::Application {
+            return Err(ApiError::ServerApplication {
                 message: root.message,
                 status_code,
             });
         }
 
-        Ok(root.body)
+        // Check for return code
+        if status_code != StatusCode::OK {
+            return Err(ApiError::ServerHTTP { status_code });
+        }
+
+        // Parse body next
+        let body: T = from_value(root.body).map_err(ApiError::JSONParse)?;
+
+        Ok(body)
     }
 }
 
@@ -49,13 +65,17 @@ impl<T: Serialize + DeserializeOwned> Root<T> {
 pub enum ApiError {
     #[error("problem with http/network")]
     Network(#[source] reqwest::Error),
+    #[error("server returned an empty response with code {status_code}")]
+    EmptyResponse { status_code: StatusCode },
     #[error("couldn't parse received json")]
-    Parse(#[source] reqwest::Error),
-    #[error("\"{message}\" ({status_code})")]
-    Application {
+    JSONParse(#[source] serde_json::Error),
+    #[error("server returned \"{message}\" ({status_code})")]
+    ServerApplication {
         message: String,
         status_code: StatusCode,
     },
+    #[error("server returned {status_code}")]
+    ServerHTTP { status_code: StatusCode },
 }
 
 // -----
