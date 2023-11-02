@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Duration};
 use anyhow::Result;
 use reqwest::{Client, RequestBuilder};
 use tokio::{
-    fs::{create_dir_all, File, rename},
+    fs::{create_dir_all, rename, File},
     io::AsyncWriteExt,
 };
 use tokio_stream::StreamExt;
@@ -203,7 +203,11 @@ pub async fn dl_illust(
                     .timeout(Duration::from_secs(TIMEOUT));
                 let path_clone = download.path.clone();
                 let temp_path_clone = download.temp_path.clone();
-                Some(tokio::spawn(dl_image_to_disk(path_clone, temp_path_clone, req)))
+                Some(tokio::spawn(dl_image_to_disk(
+                    path_clone,
+                    temp_path_clone,
+                    req,
+                )))
             } else {
                 None
             };
@@ -217,7 +221,11 @@ pub async fn dl_illust(
     Ok(())
 }
 
-async fn dl_image_to_disk(save_path: PathBuf, temp_save_path: PathBuf, req: RequestBuilder) -> Result<()> {
+async fn dl_image_to_disk(
+    save_path: PathBuf,
+    temp_save_path: PathBuf,
+    req: RequestBuilder,
+) -> Result<()> {
     let resp = req.send().await?;
     resp.error_for_status_ref()?;
 
