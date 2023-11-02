@@ -41,7 +41,7 @@ enum Args {
 
 #[derive(Subcommand, Debug)]
 pub enum UsersSubcommands {
-    /// Add a new user with their cookie, along with a name for identification
+    /// Add a new (or update) user with their cookie, along with a name for identification
     AddUser {
         /// Cookie for this user. Can be pulled from a web browser-based session with dev tools
         #[arg(value_parser = sanitize_cookie)]
