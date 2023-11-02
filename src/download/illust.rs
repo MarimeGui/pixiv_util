@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Duration};
 use anyhow::Result;
 use reqwest::{Client, RequestBuilder};
 use tokio::{
-    fs::{create_dir_all, File},
+    fs::{create_dir_all, File, rename},
     io::AsyncWriteExt,
 };
 use tokio_stream::StreamExt;
@@ -109,6 +109,7 @@ const TIMEOUT: u64 = 120;
 struct DownloadTask<T> {
     url: String,
     path: PathBuf,
+    temp_path: PathBuf,
     tries: usize,
     task: Option<T>,
 }
@@ -147,11 +148,14 @@ pub async fn dl_illust(
 
         // Append filename
         let mut save_path = save_path.clone();
+        let mut temp_save_path = save_path.clone();
         save_path.push(filename);
+        temp_save_path.push(format!("._{}", filename));
 
         downloads.push(DownloadTask {
             url,
             path: save_path,
+            temp_path: temp_save_path,
             tries: 0,
             task: None,
         })
@@ -198,7 +202,8 @@ pub async fn dl_illust(
                     .get(&download.url)
                     .timeout(Duration::from_secs(TIMEOUT));
                 let path_clone = download.path.clone();
-                Some(tokio::spawn(dl_image_to_disk(path_clone, req)))
+                let temp_path_clone = download.temp_path.clone();
+                Some(tokio::spawn(dl_image_to_disk(path_clone, temp_path_clone, req)))
             } else {
                 None
             };
@@ -212,16 +217,22 @@ pub async fn dl_illust(
     Ok(())
 }
 
-async fn dl_image_to_disk(save_path: PathBuf, req: RequestBuilder) -> Result<()> {
+async fn dl_image_to_disk(save_path: PathBuf, temp_save_path: PathBuf, req: RequestBuilder) -> Result<()> {
     let resp = req.send().await?;
     resp.error_for_status_ref()?;
 
-    let mut file = File::create(save_path).await?;
+    let mut file = File::create(&temp_save_path).await?;
     let mut stream = resp.bytes_stream();
 
     while let Some(data) = stream.next().await {
         file.write_all(&data?).await?
     }
+
+    // Manual drop to properly close file
+    drop(file);
+
+    // Rename from temporary filename to permanent one
+    rename(temp_save_path, save_path).await?;
 
     Ok(())
 }
