@@ -5,6 +5,7 @@ use reqwest::{Client, RequestBuilder};
 use tokio::{
     fs::{create_dir_all, rename, File},
     io::AsyncWriteExt,
+    task::JoinHandle,
 };
 use tokio_stream::StreamExt;
 
@@ -15,6 +16,14 @@ use crate::{
     user_mgmt::get_user_id,
     DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
 };
+
+// -----
+
+const MAX_RETRIES: usize = 3;
+const TIMEOUT: u64 = 120;
+const MAX_PARALLEL: usize = 100;
+
+// -----
 
 pub async fn download_illust(
     params: DownloadIllustParameters,
@@ -103,13 +112,14 @@ pub async fn download_illust(
     Ok(())
 }
 
-const MAX_RETRIES: usize = 3;
-const TIMEOUT: u64 = 120;
-
-struct DownloadTask<T> {
+struct DownloadInfo {
     url: String,
     path: PathBuf,
     temp_path: PathBuf,
+}
+
+struct DownloadTask<T> {
+    info: DownloadInfo,
     tries: usize,
     task: Option<T>,
 }
@@ -134,7 +144,10 @@ pub async fn dl_illust(
         save_path.push(illust_id.to_string());
     }
 
-    let mut downloads = Vec::with_capacity(pages.len());
+    let total_downloads = pages.len();
+    let mut queued_downloads = Vec::with_capacity(total_downloads);
+
+    // Create all DownloadInfos
     for page in pages.into_iter() {
         let url = page.urls.original;
 
@@ -152,69 +165,77 @@ pub async fn dl_illust(
         save_path.push(filename);
         temp_save_path.push(format!("._{}", filename));
 
-        downloads.push(DownloadTask {
+        queued_downloads.push(DownloadInfo {
             url,
             path: save_path,
             temp_path: temp_save_path,
-            tries: 0,
-            task: None,
         })
     }
 
-    // Check on every task, retry if necessary
-    loop {
-        let mut done = true;
+    type OngoingDownload = Option<DownloadTask<JoinHandle<Result<(), anyhow::Error>>>>;
+    let mut ongoing_downloads: [OngoingDownload; MAX_PARALLEL] = std::array::from_fn(|_| None); // https://stackoverflow.com/a/66776497 Don't like that I need to specify the type manually
+    let mut finished_downloads = 0;
 
-        for download in downloads.iter_mut() {
-            let initiate = match (download.tries, &mut download.task) {
-                // Hasn't yet started
-                (0, None) => true,
-                // Has completed already
-                (_, None) => false,
-                // Is undergoing
-                (current_tries, Some(j)) => match j.await {
-                    Ok(i) => match i {
-                        // We're done !
-                        Ok(_) => false,
-                        Err(e) => {
-                            if current_tries > MAX_RETRIES {
-                                // Tried too many times, let it go.
-                                eprintln!("{}: {}", download.path.display(), e);
-                                false
-                            } else {
-                                // Try again !
-                                true
-                            }
+    'outer: loop {
+        for slot in ongoing_downloads.iter_mut() {
+            if let Some(d) = slot {
+                // Check on ongoing download
+                if let Some(task) = &mut d.task {
+                    match task.await {
+                        Ok(_) => {
+                            // If went OK, clear slot
+                            finished_downloads += 1;
+                            *slot = None
                         }
-                    },
-                    // JoinError, print error and don't try again.
-                    Err(e) => {
-                        eprintln!("{}: {}", download.path.display(), e);
-                        false
+                        Err(e) => {
+                            if d.tries > MAX_RETRIES {
+                                // Tried too many times, let it go.
+                                eprintln!(
+                                    "(Tried {} times) {}: {}",
+                                    MAX_RETRIES,
+                                    d.info.path.display(),
+                                    e
+                                );
+                                finished_downloads += 1;
+                                *slot = None
+                            }
+                            // If need to retry, keep current slot as is
+                        }
                     }
-                },
-            };
+                }
+            }
 
-            download.task = if initiate {
-                done = false;
-                download.tries += 1;
+            // If slot is empty (either first dl or previous dl finished), try to get next task
+            if slot.is_none() {
+                if let Some(info) = queued_downloads.pop() {
+                    *slot = Some(DownloadTask {
+                        info,
+                        tries: 0,
+                        task: None,
+                    });
+                }
+            }
+
+            // If slot is not None, spawn new task
+            if let Some(d) = slot {
                 let req = client
-                    .get(&download.url)
+                    .get(&d.info.url)
                     .timeout(Duration::from_secs(TIMEOUT));
-                let path_clone = download.path.clone();
-                let temp_path_clone = download.temp_path.clone();
-                Some(tokio::spawn(dl_image_to_disk(
+                let path_clone = d.info.path.clone();
+                let temp_path_clone = d.info.temp_path.clone();
+
+                d.tries += 1;
+                d.task = Some(tokio::spawn(dl_image_to_disk(
                     path_clone,
                     temp_path_clone,
                     req,
-                )))
-            } else {
-                None
-            };
-        }
+                )));
+            }
 
-        if done {
-            break;
+            // If all downloads have finished, exit loop
+            if finished_downloads >= total_downloads {
+                break 'outer;
+            }
         }
     }
 
