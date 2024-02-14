@@ -12,6 +12,7 @@ pub mod novel;
 pub mod series;
 pub mod ugoira_meta;
 pub mod user_bookmarks;
+pub mod user_illustmanga_tag;
 pub mod user_info;
 
 // -----
