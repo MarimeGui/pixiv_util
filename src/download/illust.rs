@@ -1,11 +1,11 @@
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
+use futures::stream::FuturesUnordered;
 use reqwest::{Client, RequestBuilder};
 use tokio::{
     fs::{create_dir_all, rename, File},
     io::AsyncWriteExt,
-    task::JoinHandle,
 };
 use tokio_stream::StreamExt;
 
@@ -118,12 +118,6 @@ struct DownloadInfo {
     temp_path: PathBuf,
 }
 
-struct DownloadTask<T> {
-    info: DownloadInfo,
-    tries: usize,
-    task: Option<T>,
-}
-
 pub async fn dl_illust(
     client: &Client,
     illust_id: u64,
@@ -172,74 +166,73 @@ pub async fn dl_illust(
         })
     }
 
-    type OngoingDownload = Option<DownloadTask<JoinHandle<Result<(), anyhow::Error>>>>;
-    let mut ongoing_downloads: [OngoingDownload; MAX_PARALLEL] = std::array::from_fn(|_| None); // https://stackoverflow.com/a/66776497 Don't like that I need to specify the type manually
-    let mut finished_downloads = 0;
+    let mut active_tasks = 0;
+    let mut finished_tasks = 0;
 
-    'outer: loop {
-        for slot in ongoing_downloads.iter_mut() {
-            if let Some(d) = slot {
-                // Check on ongoing download
-                if let Some(task) = &mut d.task {
-                    match task.await {
-                        Ok(_) => {
-                            // If went OK, clear slot
-                            finished_downloads += 1;
-                            *slot = None
-                        }
-                        Err(e) => {
-                            if d.tries > MAX_RETRIES {
-                                // Tried too many times, let it go.
-                                eprintln!(
-                                    "(Tried {} times) {}: {}",
-                                    MAX_RETRIES,
-                                    d.info.path.display(),
-                                    e
-                                );
-                                finished_downloads += 1;
-                                *slot = None
-                            }
-                            // If need to retry, keep current slot as is
-                        }
+    let mut tasks = FuturesUnordered::new();
+
+    loop {
+        // If there are available downloads and we're under the limit of parallel tasks
+        if !queued_downloads.is_empty() & (active_tasks < MAX_PARALLEL) {
+            // TODO: Avoid useless loops ?
+            for _ in 0..MAX_PARALLEL - active_tasks {
+                // Add all possible downloads
+                if let Some(info) = queued_downloads.pop() {
+                    // Put that to the FuturesUnordered thing
+                    tasks.push(wrap_dl(client, info, 0));
+                    active_tasks += 1;
+                }
+            }
+        }
+
+        // Wait for a download to complete
+        if let Some(r) = tasks.next().await {
+            match r.2 {
+                Ok(_) => {
+                    finished_tasks += 1;
+                    active_tasks -= 1;
+                    // If all downloads finished
+                    if finished_tasks >= total_downloads {
+                        break;
                     }
                 }
-            }
-
-            // If slot is empty (either first dl or previous dl finished), try to get next task
-            if slot.is_none() {
-                if let Some(info) = queued_downloads.pop() {
-                    *slot = Some(DownloadTask {
-                        info,
-                        tries: 0,
-                        task: None,
-                    });
+                Err(e) => {
+                    if r.1 > MAX_RETRIES {
+                        // Tried too many times, let it go.
+                        eprintln!(
+                            "(Tried {} times) {}: {}",
+                            MAX_RETRIES,
+                            r.0.path.display(),
+                            e
+                        );
+                        finished_tasks += 1;
+                        active_tasks -= 1;
+                    } else {
+                        // No matter what the error was, try again, this time with passion !
+                        tasks.push(wrap_dl(client, r.0, r.1 + 1));
+                    }
                 }
-            }
-
-            // If slot is not None, spawn new task
-            if let Some(d) = slot {
-                let req = client
-                    .get(&d.info.url)
-                    .timeout(Duration::from_secs(TIMEOUT));
-                let path_clone = d.info.path.clone();
-                let temp_path_clone = d.info.temp_path.clone();
-
-                d.tries += 1;
-                d.task = Some(tokio::spawn(dl_image_to_disk(
-                    path_clone,
-                    temp_path_clone,
-                    req,
-                )));
-            }
-
-            // If all downloads have finished, exit loop
-            if finished_downloads >= total_downloads {
-                break 'outer;
             }
         }
     }
 
     Ok(())
+}
+
+async fn wrap_dl(
+    client: &Client,
+    info: DownloadInfo,
+    tries: usize,
+) -> (DownloadInfo, usize, Result<()>) {
+    let req = client.get(&info.url).timeout(Duration::from_secs(TIMEOUT));
+    let path_clone = info.path.clone();
+    let temp_path_clone = info.temp_path.clone();
+
+    (
+        info,
+        tries,
+        dl_image_to_disk(path_clone, temp_path_clone, req).await,
+    )
 }
 
 async fn dl_image_to_disk(
