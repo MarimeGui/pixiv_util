@@ -5,6 +5,7 @@ use super::{de_id, ApiError, Root};
 
 pub async fn _get(
     client: &Client,
+    user_id: u64,
     tag: String,
     offset: usize,
     limit: usize,
@@ -12,8 +13,8 @@ pub async fn _get(
     Root::query(
         client,
         &format!(
-            "https://www.pixiv.net/ajax/user/817796/illustmanga/tag?tag={}&offset={}&limit={}",
-            tag, offset, limit,
+            "https://www.pixiv.net/ajax/user/{}/illustmanga/tag?tag={}&offset={}&limit={}",
+            user_id, tag, offset, limit,
         ),
     )
     .await
