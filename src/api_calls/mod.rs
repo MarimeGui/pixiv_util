@@ -62,6 +62,12 @@ impl<T: Serialize + DeserializeOwned> Root<T> {
 
 // -----
 
+trait PartialResults {}
+
+trait CompleteResults {}
+
+// -----
+
 #[derive(Error, Debug)]
 pub enum ApiError {
     #[error("problem with http/network")]

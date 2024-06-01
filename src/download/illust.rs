@@ -10,7 +10,10 @@ use tokio::{
 use tokio_stream::StreamExt;
 
 use crate::{
-    abstractions::{get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts},
+    abstractions::{
+        get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts,
+        get_all_user_img_posts_with_tag,
+    },
     incremental::{is_illust_in_files, list_all_files},
     update_file::create_update_file,
     user_mgmt::get_user_id,
@@ -70,8 +73,12 @@ pub async fn download_illust(
         DownloadIllustModes::Series { series_id } => {
             get_all_series_works(&client, *series_id, f).await?
         }
-        DownloadIllustModes::UserPosts { user_id } => {
-            get_all_user_img_posts(&client, *user_id, f).await?;
+        DownloadIllustModes::UserPosts { tag, user_id } => {
+            if let Some(tag) = tag {
+                get_all_user_img_posts_with_tag(&client, *user_id, tag, f).await?;
+            } else {
+                get_all_user_img_posts(&client, *user_id, f).await?;
+            }
         }
         DownloadIllustModes::UserBookmarks { user_id } => {
             // Get user id to use for downloads

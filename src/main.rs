@@ -138,6 +138,10 @@ pub enum DownloadIllustModes {
     },
     /// Download all posts from a user
     UserPosts {
+        /// Only download posts with a specific tag applied
+        #[arg(short, long, value_name = "TAG")]
+        tag: Option<String>,
+        /// ID of user to download from
         #[arg(value_parser = parse_user_id)]
         user_id: u64,
     },

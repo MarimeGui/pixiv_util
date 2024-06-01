@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{de_id, ApiError, Root};
 
-pub async fn _get(
+pub async fn get(
     client: &Client,
     user_id: u64,
-    tag: String,
+    tag: &str,
     offset: usize,
     limit: usize,
 ) -> Result<Body, ApiError> {
