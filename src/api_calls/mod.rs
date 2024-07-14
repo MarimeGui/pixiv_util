@@ -68,9 +68,9 @@ impl<T: Serialize + DeserializeOwned> Root<T> {
 
 // -----
 
-trait PartialResults {}
+// trait PartialResults {}
 
-trait CompleteResults {}
+// trait CompleteResults {}
 
 // -----
 
