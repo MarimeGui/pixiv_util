@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::gen_http_client::SemaphoredClient;
-
 use super::{ApiError, Root};
+use crate::gen_http_client::SemaphoredClient;
 
 pub async fn get(client: SemaphoredClient, illust_id: u64) -> Result<Vec<Page>, ApiError> {
     Root::query(
