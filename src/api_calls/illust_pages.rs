@@ -1,9 +1,10 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
+
+use crate::gen_http_client::SemaphoredClient;
 
 use super::{ApiError, Root};
 
-pub async fn get(client: &Client, illust_id: u64) -> Result<Vec<Page>, ApiError> {
+pub async fn get(client: SemaphoredClient, illust_id: u64) -> Result<Vec<Page>, ApiError> {
     Root::query(
         client,
         &format!("https://www.pixiv.net/ajax/illust/{}/pages", illust_id),

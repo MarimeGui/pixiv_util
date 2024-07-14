@@ -1,9 +1,9 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::{de_id, ApiError, Root};
+use crate::gen_http_client::SemaphoredClient;
 
-pub async fn get(client: &Client, series_id: u64, page: usize) -> Result<Body, ApiError> {
+pub async fn get(client: SemaphoredClient, series_id: u64, page: usize) -> Result<Body, ApiError> {
     Root::query(
         client,
         &format!("https://www.pixiv.net/ajax/series/{}?p={}", series_id, page,),

@@ -1,10 +1,12 @@
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use serde::{
     de::{self, DeserializeOwned},
     Deserialize, Deserializer, Serialize,
 };
 use serde_json::{from_slice, from_value, Value};
 use thiserror::Error;
+
+use crate::gen_http_client::SemaphoredClient;
 
 pub mod illust;
 pub mod illust_pages;
@@ -26,11 +28,15 @@ pub struct Root<T> {
 }
 
 impl<T: Serialize + DeserializeOwned> Root<T> {
-    pub async fn query(client: &Client, url: &str) -> Result<T, ApiError> {
-        let req = client.get(url);
+    pub async fn query(client: SemaphoredClient, url: &str) -> Result<T, ApiError> {
+        let permit = client.semaphore.acquire().await.unwrap(); // TODO: Handle this unwrap properly ?
+
+        let req = client.client.get(url);
         let resp = req.send().await.map_err(ApiError::Network)?;
         let status_code = resp.status();
         let full = resp.bytes().await.map_err(ApiError::Network)?;
+
+        drop(permit); // TODO: Move drop higher ?
 
         // Check for empty response
         if full.is_empty() {

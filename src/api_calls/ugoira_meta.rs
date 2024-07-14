@@ -1,9 +1,9 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::{ApiError, Root};
+use crate::gen_http_client::SemaphoredClient;
 
-pub async fn _get(client: &Client, illust_id: u64) -> Result<Body, ApiError> {
+pub async fn _get(client: SemaphoredClient, illust_id: u64) -> Result<Body, ApiError> {
     Root::query(
         client,
         &format!(

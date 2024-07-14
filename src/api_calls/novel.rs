@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::{ApiError, Root};
+use crate::gen_http_client::SemaphoredClient;
 
-pub async fn get(client: &Client, novel_id: u64) -> Result<NovelInfo, ApiError> {
+pub async fn get(client: SemaphoredClient, novel_id: u64) -> Result<NovelInfo, ApiError> {
     Root::query(
         client,
         &format!("https://www.pixiv.net/ajax/novel/{}", novel_id),

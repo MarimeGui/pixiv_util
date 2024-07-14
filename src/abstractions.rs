@@ -1,14 +1,20 @@
 use anyhow::Result;
-use reqwest::Client;
+
+use crate::gen_http_client::SemaphoredClient;
 
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
-pub async fn get_all_user_bookmarks<F>(client: &Client, user_id: u64, mut f: F) -> Result<()>
+pub async fn get_all_user_bookmarks<F>(
+    client: SemaphoredClient,
+    user_id: u64,
+    mut f: F,
+) -> Result<()>
 where
     F: FnMut(u64) -> bool,
 {
     // Request first page separately to get the number of bookmarks
-    let first = crate::api_calls::user_bookmarks::get(client, user_id, 0, ILLUSTS_PER_PAGE).await?;
+    let first =
+        crate::api_calls::user_bookmarks::get(client.clone(), user_id, 0, ILLUSTS_PER_PAGE).await?;
     for work in first.works {
         if work.is_masked {
             // Ignore illusts that have been removed
@@ -25,7 +31,7 @@ where
         (first.total / ILLUSTS_PER_PAGE) + usize::from(first.total % ILLUSTS_PER_PAGE != 0);
     for page in 1..nb_pages {
         let body = crate::api_calls::user_bookmarks::get(
-            client,
+            client.clone(),
             user_id,
             page * ILLUSTS_PER_PAGE,
             ILLUSTS_PER_PAGE,
@@ -46,7 +52,7 @@ where
 
 // TODO: Shameless copy paste for now
 pub async fn get_all_user_img_posts_with_tag<F>(
-    client: &Client,
+    client: SemaphoredClient,
     user_id: u64,
     tag: &str,
     mut f: F,
@@ -55,9 +61,14 @@ where
     F: FnMut(u64) -> bool,
 {
     // Request first page separately to get the number of bookmarks
-    let first =
-        crate::api_calls::user_illustmanga_tag::get(client, user_id, tag, 0, ILLUSTS_PER_PAGE)
-            .await?;
+    let first = crate::api_calls::user_illustmanga_tag::get(
+        client.clone(),
+        user_id,
+        tag,
+        0,
+        ILLUSTS_PER_PAGE,
+    )
+    .await?;
     for work in first.works {
         if work.is_masked {
             // Ignore illusts that have been removed
@@ -71,7 +82,7 @@ where
         (first.total / ILLUSTS_PER_PAGE) + usize::from(first.total % ILLUSTS_PER_PAGE != 0);
     for page in 1..nb_pages {
         let body = crate::api_calls::user_illustmanga_tag::get(
-            client,
+            client.clone(),
             user_id,
             tag,
             page * ILLUSTS_PER_PAGE,
@@ -89,7 +100,11 @@ where
     Ok(())
 }
 
-pub async fn get_all_user_img_posts<F>(client: &Client, user_id: u64, mut f: F) -> Result<()>
+pub async fn get_all_user_img_posts<F>(
+    client: SemaphoredClient,
+    user_id: u64,
+    mut f: F,
+) -> Result<()>
 where
     F: FnMut(u64) -> bool,
 {
@@ -106,7 +121,11 @@ where
     Ok(())
 }
 
-pub async fn get_all_series_works<F>(client: &Client, series_id: u64, mut f: F) -> Result<()>
+pub async fn get_all_series_works<F>(
+    client: SemaphoredClient,
+    series_id: u64,
+    mut f: F,
+) -> Result<()>
 where
     F: FnMut(u64) -> bool,
 {
@@ -114,7 +133,7 @@ where
     let mut total = 0;
 
     loop {
-        let body = crate::api_calls::series::get(client, series_id, page_index).await?;
+        let body = crate::api_calls::series::get(client.clone(), series_id, page_index).await?;
         page_index += 1;
 
         total += body.page.series.len();

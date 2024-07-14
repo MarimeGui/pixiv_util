@@ -1,18 +1,17 @@
 use std::fs::File as StdFile;
 
 use anyhow::Result;
-use reqwest::Client;
 
 use crate::{
-    update_file::UPDATE_FILE, DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
-    DownloadUpdateParameters,
+    gen_http_client::SemaphoredClient, update_file::UPDATE_FILE, DirectoryPolicy,
+    DownloadIllustModes, DownloadIllustParameters, DownloadUpdateParameters,
 };
 
 use super::illust::download_illust;
 
 pub async fn download_updates(
     params: DownloadUpdateParameters,
-    client: Client,
+    client: SemaphoredClient,
     cookie: Option<String>,
 ) -> Result<()> {
     if params.recursive {

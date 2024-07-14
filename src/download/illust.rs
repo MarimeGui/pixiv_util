@@ -1,11 +1,11 @@
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
-use futures::stream::FuturesUnordered;
-use reqwest::{Client, RequestBuilder};
+use reqwest::RequestBuilder;
 use tokio::{
     fs::{create_dir_all, rename, File},
     io::AsyncWriteExt,
+    task::JoinSet,
 };
 use tokio_stream::StreamExt;
 
@@ -14,6 +14,7 @@ use crate::{
         get_all_series_works, get_all_user_bookmarks, get_all_user_img_posts,
         get_all_user_img_posts_with_tag,
     },
+    gen_http_client::SemaphoredClient,
     incremental::{is_illust_in_files, list_all_files},
     update_file::create_update_file,
     user_mgmt::get_user_id,
@@ -24,13 +25,12 @@ use crate::{
 
 const MAX_RETRIES: usize = 3;
 const TIMEOUT: u64 = 120;
-const MAX_PARALLEL: usize = 100;
 
 // -----
 
 pub async fn download_illust(
     params: DownloadIllustParameters,
-    client: Client,
+    client: SemaphoredClient,
     cookie: Option<String>,
 ) -> Result<()> {
     // If there is a specified path, use it, otherwise use blank for current dir
@@ -58,7 +58,7 @@ pub async fn download_illust(
         let client = client.clone();
         let save_path = output_dir.clone();
         tasks.push(tokio::spawn(async move {
-            dl_illust(&client, illust_id, save_path, params.directory_policy).await
+            dl_illust(client, illust_id, save_path, params.directory_policy).await
         }));
         true
     };
@@ -71,13 +71,13 @@ pub async fn download_illust(
             }
         }
         DownloadIllustModes::Series { series_id } => {
-            get_all_series_works(&client, *series_id, f).await?
+            get_all_series_works(client.clone(), *series_id, f).await?
         }
         DownloadIllustModes::UserPosts { tag, user_id } => {
             if let Some(tag) = tag {
-                get_all_user_img_posts_with_tag(&client, *user_id, tag, f).await?;
+                get_all_user_img_posts_with_tag(client.clone(), *user_id, tag, f).await?;
             } else {
-                get_all_user_img_posts(&client, *user_id, f).await?;
+                get_all_user_img_posts(client.clone(), *user_id, f).await?;
             }
         }
         DownloadIllustModes::UserBookmarks { user_id } => {
@@ -96,7 +96,7 @@ pub async fn download_illust(
                 return Err(anyhow::anyhow!("No user ID specified !"));
             };
 
-            get_all_user_bookmarks(&client, id, f).await?;
+            get_all_user_bookmarks(client.clone(), id, f).await?;
         }
     }
 
@@ -126,12 +126,12 @@ struct DownloadInfo {
 }
 
 pub async fn dl_illust(
-    client: &Client,
+    client: SemaphoredClient,
     illust_id: u64,
     mut save_path: PathBuf,
     directory_policy: DirectoryPolicy,
 ) -> Result<()> {
-    let pages = crate::api_calls::illust_pages::get(client, illust_id).await?;
+    let pages = crate::api_calls::illust_pages::get(client.clone(), illust_id).await?;
 
     let in_dir = match directory_policy {
         DirectoryPolicy::AlwaysCreate => true,
@@ -173,52 +173,29 @@ pub async fn dl_illust(
         })
     }
 
-    let mut active_tasks = 0;
-    let mut finished_tasks = 0;
+    let mut set = JoinSet::new();
 
-    let mut tasks = FuturesUnordered::new();
+    // Create all tasks
+    for info in queued_downloads {
+        set.spawn(wrap_dl(client.clone(), info, 0));
+    }
 
-    loop {
-        // If there are available downloads and we're under the limit of parallel tasks
-        if !queued_downloads.is_empty() & (active_tasks < MAX_PARALLEL) {
-            // TODO: Avoid useless loops ?
-            for _ in 0..MAX_PARALLEL - active_tasks {
-                // Add all possible downloads
-                if let Some(info) = queued_downloads.pop() {
-                    // Put that to the FuturesUnordered thing
-                    tasks.push(wrap_dl(client, info, 0));
-                    active_tasks += 1;
-                }
-            }
-        }
+    // Wait for completion, restart if necessary
+    while let Some(r) = set.join_next().await {
+        let r = r.unwrap();
 
-        // Wait for a download to complete
-        if let Some(r) = tasks.next().await {
-            match r.2 {
-                Ok(_) => {
-                    finished_tasks += 1;
-                    active_tasks -= 1;
-                    // If all downloads finished
-                    if finished_tasks >= total_downloads {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    if r.1 > MAX_RETRIES {
-                        // Tried too many times, let it go.
-                        eprintln!(
-                            "(Tried {} times) {}: {}",
-                            MAX_RETRIES,
-                            r.0.path.display(),
-                            e
-                        );
-                        finished_tasks += 1;
-                        active_tasks -= 1;
-                    } else {
-                        // No matter what the error was, try again, this time with passion !
-                        tasks.push(wrap_dl(client, r.0, r.1 + 1));
-                    }
-                }
+        if let Err(e) = r.2 {
+            if r.1 > MAX_RETRIES {
+                // Tried too many times, let it go.
+                eprintln!(
+                    "(Tried {} times) {}: {}",
+                    MAX_RETRIES,
+                    r.0.path.display(),
+                    e
+                );
+            } else {
+                // No matter what the error was, try again, this time with passion !
+                set.spawn(wrap_dl(client.clone(), r.0, r.1 + 1));
             }
         }
     }
@@ -227,19 +204,28 @@ pub async fn dl_illust(
 }
 
 async fn wrap_dl(
-    client: &Client,
+    client: SemaphoredClient,
     info: DownloadInfo,
     tries: usize,
 ) -> (DownloadInfo, usize, Result<()>) {
-    let req = client.get(&info.url).timeout(Duration::from_secs(TIMEOUT));
+    let permit = client.semaphore.acquire().await.unwrap(); // TODO: Handle unwrap better ?
+
+    let req = client
+        .client
+        .get(&info.url)
+        .timeout(Duration::from_secs(TIMEOUT));
     let path_clone = info.path.clone();
     let temp_path_clone = info.temp_path.clone();
 
-    (
+    let ret = (
         info,
         tries,
         dl_image_to_disk(path_clone, temp_path_clone, req).await,
-    )
+    );
+
+    drop(permit); // TODO: Move this up ?
+
+    ret
 }
 
 async fn dl_image_to_disk(

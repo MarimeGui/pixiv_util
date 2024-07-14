@@ -1,10 +1,10 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::{de_id, ApiError, Root};
+use crate::gen_http_client::SemaphoredClient;
 
 pub async fn get(
-    client: &Client,
+    client: SemaphoredClient,
     user_id: u64,
     offset: usize,
     limit: usize,
