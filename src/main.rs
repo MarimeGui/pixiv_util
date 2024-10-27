@@ -1,7 +1,5 @@
-mod abstractions;
 mod api_calls;
 mod download;
-mod file_download;
 mod find_not_bookmarked;
 mod gen_http_client;
 mod incremental;
