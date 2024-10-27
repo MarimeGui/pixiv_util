@@ -14,7 +14,16 @@ pub async fn get(client: SemaphoredClient, series_id: u64, page: usize) -> Resul
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Body {
+    pub illust_series: Vec<SeriesInfo>,
     pub page: Page,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesInfo {
+    #[serde(deserialize_with = "de_id")]
+    pub id: u64,
+    pub title: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
