@@ -143,7 +143,7 @@ pub async fn do_users_subcommand(s: UsersSubcommands) -> Result<()> {
                             }
                         }
                         UsersSubcommands::SetDefault { username: name } => {
-                            if db.users.get(&name).is_some() {
+                            if db.users.contains_key(&name) {
                                 db.default_user = Some(name)
                             } else {
                                 return Err(anyhow::anyhow!("No such user in database !"));
