@@ -29,6 +29,7 @@ pub async fn download_updates(
         DownloadIllustParameters {
             incremental: Some(None),
             fast_incremental: false,
+            disable_named_dir: true,
             no_update_file: true,
             output_directory: params.directory,
             directory_policy: DirectoryPolicy::NeverCreate,

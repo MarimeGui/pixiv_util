@@ -4,16 +4,17 @@ mod single;
 mod user_bookmarks;
 mod user_posts;
 
-use anyhow::Result;
+use std::{fs::read_dir, path::Path};
+
+use anyhow::{anyhow, Result};
 use individual::dl_individual;
 use series::dl_series;
 use user_bookmarks::dl_user_bookmarks;
 use user_posts::{dl_user_posts, dl_user_posts_with_tag};
 
 use crate::{
-    gen_http_client::SemaphoredClient, incremental::list_all_files,
-    update_file::create_update_file, user_mgmt::get_user_id, DownloadIllustModes,
-    DownloadIllustParameters,
+    gen_http_client::SemaphoredClient, incremental::list_all_files, user_mgmt::get_user_id,
+    DownloadIllustModes, DownloadIllustParameters,
 };
 
 pub async fn download_illust(
@@ -31,6 +32,12 @@ pub async fn download_illust(
         None
     };
 
+    // Check if we're going to create a named sub directory
+    let create_named_dir = create_named_dir(params.disable_named_dir, &params.mode, &dest_dir)?;
+
+    // Should we create an update file
+    let make_update_file = !params.no_update_file & params.incremental.is_none();
+
     match &params.mode {
         DownloadIllustModes::Individual { illust_ids } => {
             dl_individual(
@@ -47,6 +54,8 @@ pub async fn download_illust(
                 dest_dir.clone(),
                 params.directory_policy,
                 file_list,
+                create_named_dir,
+                make_update_file,
                 *series_id,
             )
             .await?
@@ -58,6 +67,7 @@ pub async fn download_illust(
                     dest_dir.clone(),
                     params.directory_policy,
                     file_list,
+                    make_update_file,
                     *user_id,
                     tag,
                 )
@@ -69,6 +79,7 @@ pub async fn download_illust(
                     dest_dir.clone(),
                     params.directory_policy,
                     file_list,
+                    make_update_file,
                     *user_id,
                 )
                 .await?
@@ -94,22 +105,64 @@ pub async fn download_illust(
                 dest_dir.clone(),
                 params.directory_policy,
                 file_list,
+                make_update_file,
                 id,
             )
             .await?
         }
     }
 
-    // Create an update file
-    if !params.no_update_file & params.incremental.is_none() {
-        match &params.mode {
-            // Ignore single illusts
-            DownloadIllustModes::Individual { illust_ids: _ } => {}
-            _ => {
-                create_update_file(&dest_dir, &params.mode)?;
-            }
+    Ok(())
+}
+
+/// Checks if it would be wise to create a new directory named after series or user within specified destination directory
+fn create_named_dir(
+    creation_disabled: bool,
+    dl_mode: &DownloadIllustModes,
+    dest_dir: &Path,
+) -> Result<bool> {
+    // Creation is straight up disabled
+    if creation_disabled {
+        return Ok(false);
+    }
+
+    // Only create in specific modes
+    match dl_mode {
+        // For now, only in series
+        DownloadIllustModes::Series { series_id: _ } => {}
+        _ => return Ok(false),
+    }
+
+    // Check contents of dest dir
+    let (_, nb_dirs) = count_files_dirs(dest_dir)?;
+
+    // If dir is empty or only contains files, assume user wants illusts directly in this dir.
+    if nb_dirs == 0 {
+        return Ok(false);
+    }
+
+    // At least 1 other dir, assume user wants new named dir in dest
+    Ok(true)
+}
+
+/// Count nb of files and dirs in specified dir
+pub fn count_files_dirs(path: &Path) -> Result<(usize, usize)> {
+    if !path.is_dir() {
+        return Err(anyhow!("Not a dir"));
+    }
+
+    let mut nb_files = 0;
+    let mut nb_dirs = 0;
+
+    for entry in read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry_path.is_file() {
+            nb_files += 1;
+        } else if entry_path.is_dir() {
+            nb_dirs += 1;
         }
     }
 
-    Ok(())
+    Ok((nb_files, nb_dirs))
 }

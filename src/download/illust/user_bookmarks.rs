@@ -8,7 +8,10 @@ use tokio::{
 };
 
 use super::single::dl_one_illust;
-use crate::{gen_http_client::SemaphoredClient, incremental::is_illust_in_files, DirectoryPolicy};
+use crate::{
+    gen_http_client::SemaphoredClient, incremental::is_illust_in_files,
+    update_file::create_update_file, DirectoryPolicy, DownloadIllustModes,
+};
 
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
@@ -18,6 +21,7 @@ pub async fn dl_user_bookmarks(
     dest_dir: PathBuf,
     directory_policy: DirectoryPolicy,
     file_list: Option<Vec<String>>,
+    make_update_file: bool,
     user_id: u64,
 ) -> Result<()> {
     // Arc for file list to prevent useless copies
@@ -27,7 +31,7 @@ pub async fn dl_user_bookmarks(
     let (illust_tx, illust_rx) = unbounded_channel();
     let illust_result = spawn(dl_illusts_from_channel(
         client.clone(),
-        dest_dir,
+        dest_dir.clone(),
         directory_policy,
         illust_rx,
     ));
@@ -64,6 +68,15 @@ pub async fn dl_user_bookmarks(
 
     // Check all illusts were downloaded properly
     illust_result.await??;
+
+    if make_update_file {
+        create_update_file(
+            &dest_dir,
+            &DownloadIllustModes::UserBookmarks {
+                user_id: Some(user_id),
+            },
+        )?;
+    }
 
     Ok(())
 }

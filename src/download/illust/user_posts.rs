@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use tokio::task::JoinSet;
 
-use crate::{gen_http_client::SemaphoredClient, incremental::is_illust_in_files, DirectoryPolicy};
+use crate::{
+    gen_http_client::SemaphoredClient, incremental::is_illust_in_files,
+    update_file::create_update_file, DirectoryPolicy, DownloadIllustModes,
+};
 
 use super::single::dl_one_illust;
 
@@ -14,6 +17,7 @@ pub async fn dl_user_posts(
     dest_dir: PathBuf,
     directory_policy: DirectoryPolicy,
     file_list: Option<Vec<String>>,
+    make_update_file: bool,
     user_id: u64,
 ) -> Result<()> {
     let mut set = JoinSet::new();
@@ -40,6 +44,13 @@ pub async fn dl_user_posts(
         r??
     }
 
+    if make_update_file {
+        create_update_file(
+            &dest_dir,
+            &DownloadIllustModes::UserPosts { tag: None, user_id },
+        )?;
+    }
+
     Ok(())
 }
 
@@ -48,6 +59,7 @@ pub async fn dl_user_posts_with_tag(
     dest_dir: PathBuf,
     directory_policy: DirectoryPolicy,
     file_list: Option<Vec<String>>,
+    make_update_file: bool,
     user_id: u64,
     tag: &str,
 ) -> Result<()> {
@@ -91,6 +103,16 @@ pub async fn dl_user_posts_with_tag(
 
     while let Some(r) = set.join_next().await {
         r??
+    }
+
+    if make_update_file {
+        create_update_file(
+            &dest_dir,
+            &DownloadIllustModes::UserPosts {
+                tag: Some(tag.to_owned()),
+                user_id,
+            },
+        )?;
     }
 
     Ok(())

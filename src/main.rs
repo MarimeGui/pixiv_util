@@ -56,7 +56,7 @@ pub enum UsersSubcommands {
     SetDefault { username: String },
     /// Print the default user
     GetDefault,
-    /// Set no default, i.e. specify user everytime
+    /// Set no default, i.e. specify user every time
     RemoveDefault,
     /// List all users
     ListUsers,
@@ -99,6 +99,9 @@ pub struct DownloadIllustParameters {
     /// When available, stop checking with server early as soon as an illust was found on drive. Use this option wisely
     #[arg(long)]
     fast_incremental: bool,
+    /// Disable the creation of a new directory named after the series or user.
+    #[arg(long)]
+    disable_named_dir: bool,
     /// Do not create an update file for use with update functionality
     #[arg(long)]
     no_update_file: bool,
