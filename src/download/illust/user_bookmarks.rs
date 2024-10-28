@@ -68,6 +68,11 @@ async fn dl_one_bookmark_page(
             .await?;
 
     for work in &body.works {
+        // Ignore illusts that have been removed
+        if work.is_masked {
+            continue;
+        }
+
         // Check if file already downloaded
         if let Some(files) = &*file_list {
             if is_illust_in_files(&work.id.to_string(), files) {
