@@ -1,26 +1,22 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use tokio::{fs::create_dir, task::JoinSet};
+use tokio::{fs::create_dir, sync::mpsc::UnboundedSender};
 
 use crate::{
     gen_http_client::SemaphoredClient, incremental::is_illust_in_files,
-    update_file::create_update_file, DirectoryPolicy, DownloadIllustModes,
+    update_file::create_update_file, DownloadIllustModes,
 };
-
-use super::single::dl_one_illust;
 
 pub async fn dl_series(
     client: SemaphoredClient,
     mut dest_dir: PathBuf,
-    directory_policy: DirectoryPolicy,
     file_list: Option<Vec<String>>,
     mut create_named_dir: bool,
     make_update_file: bool,
     series_id: u64,
+    illust_tx: UnboundedSender<u64>,
 ) -> Result<()> {
-    let mut set = JoinSet::new();
-
     let mut page_index = 1;
     let mut total = 0;
 
@@ -53,21 +49,12 @@ pub async fn dl_series(
                 }
             }
 
-            set.spawn(dl_one_illust(
-                client.clone(),
-                pos.work_id,
-                dest_dir.clone(),
-                directory_policy,
-            ));
+            illust_tx.send(pos.work_id)?;
         }
 
         if total == body.page.total {
             break;
         }
-    }
-
-    while let Some(r) = set.join_next().await {
-        r??
     }
 
     if make_update_file {

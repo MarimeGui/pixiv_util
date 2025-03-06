@@ -1,16 +1,11 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
-use tokio::{
-    spawn,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    task::JoinSet,
-};
+use tokio::{sync::mpsc::UnboundedSender, task::JoinSet};
 
-use super::single::dl_one_illust;
 use crate::{
     gen_http_client::SemaphoredClient, incremental::is_illust_in_files,
-    update_file::create_update_file, DirectoryPolicy, DownloadIllustModes,
+    update_file::create_update_file, DownloadIllustModes,
 };
 
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
@@ -19,22 +14,13 @@ const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 pub async fn dl_user_bookmarks(
     client: SemaphoredClient,
     dest_dir: PathBuf,
-    directory_policy: DirectoryPolicy,
     file_list: Option<Vec<String>>,
     make_update_file: bool,
     user_id: u64,
+    illust_tx: UnboundedSender<u64>,
 ) -> Result<()> {
     // Arc for file list to prevent useless copies
     let file_list = Arc::new(file_list);
-
-    // MPSC channel for illust ids, begins download
-    let (illust_tx, illust_rx) = unbounded_channel();
-    let illust_result = spawn(dl_illusts_from_channel(
-        client.clone(),
-        dest_dir.clone(),
-        directory_policy,
-        illust_rx,
-    ));
 
     // Fetch first bookmark page to get total amount of illusts
     let nb_illusts = dl_one_bookmark_page(
@@ -66,9 +52,6 @@ pub async fn dl_user_bookmarks(
         r??;
     }
 
-    // Check all illusts were downloaded properly
-    illust_result.await??;
-
     if make_update_file {
         create_update_file(
             &dest_dir,
@@ -76,32 +59,6 @@ pub async fn dl_user_bookmarks(
                 user_id: Some(user_id),
             },
         )?;
-    }
-
-    Ok(())
-}
-
-/// Initiates illust downloads coming from MPSC channel
-async fn dl_illusts_from_channel(
-    client: SemaphoredClient,
-    dest_dir: PathBuf,
-    directory_policy: DirectoryPolicy,
-    mut illust_rx: UnboundedReceiver<u64>,
-) -> Result<()> {
-    let mut set = JoinSet::new();
-
-    // For each illust
-    while let Some(illust_id) = illust_rx.recv().await {
-        set.spawn(dl_one_illust(
-            client.clone(),
-            illust_id,
-            dest_dir.clone(),
-            directory_policy,
-        ));
-    }
-
-    while let Some(r) = set.join_next().await {
-        r??
     }
 
     Ok(())

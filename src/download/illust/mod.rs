@@ -4,18 +4,27 @@ mod single;
 mod user_bookmarks;
 mod user_posts;
 
-use std::{fs::read_dir, path::Path};
+use std::{
+    fs::read_dir,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{anyhow, Result};
-use individual::dl_individual;
-use series::dl_series;
-use user_bookmarks::dl_user_bookmarks;
-use user_posts::{dl_user_posts, dl_user_posts_with_tag};
+use tokio::{
+    spawn,
+    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    task::JoinSet,
+};
 
 use crate::{
     gen_http_client::SemaphoredClient, incremental::list_all_files, user_mgmt::get_user_id,
-    DownloadIllustModes, DownloadIllustParameters,
+    DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
 };
+use individual::dl_individual;
+use series::dl_series;
+use single::dl_one_illust;
+use user_bookmarks::dl_user_bookmarks;
+use user_posts::{dl_user_posts, dl_user_posts_with_tag};
 
 pub async fn download_illust(
     params: DownloadIllustParameters,
@@ -38,25 +47,28 @@ pub async fn download_illust(
     // Should we create an update file
     let make_update_file = !params.no_update_file & params.incremental.is_none();
 
+    // Create MPSC channel for illust ids and spawn task to begin download
+    let (illust_tx, illust_rx) = unbounded_channel();
+    let illust_result = spawn(dl_illusts_from_channel(
+        client.clone(),
+        dest_dir.clone(),
+        params.directory_policy,
+        illust_rx,
+    ));
+
     match &params.mode {
         DownloadIllustModes::Individual { illust_ids } => {
-            dl_individual(
-                client,
-                dest_dir.clone(),
-                params.directory_policy,
-                illust_ids,
-            )
-            .await?
+            dl_individual(illust_ids, illust_tx).await?
         }
         DownloadIllustModes::Series { series_id } => {
             dl_series(
                 client,
                 dest_dir.clone(),
-                params.directory_policy,
                 file_list,
                 create_named_dir,
                 make_update_file,
                 *series_id,
+                illust_tx,
             )
             .await?
         }
@@ -77,10 +89,10 @@ pub async fn download_illust(
                 dl_user_posts(
                     client,
                     dest_dir.clone(),
-                    params.directory_policy,
                     file_list,
                     make_update_file,
                     *user_id,
+                    illust_tx,
                 )
                 .await?
             }
@@ -103,13 +115,42 @@ pub async fn download_illust(
             dl_user_bookmarks(
                 client,
                 dest_dir.clone(),
-                params.directory_policy,
                 file_list,
                 make_update_file,
                 id,
+                illust_tx,
             )
             .await?
         }
+    }
+
+    // Check all illusts were downloaded properly
+    illust_result.await??;
+
+    Ok(())
+}
+
+/// Initiates illust downloads coming from MPSC channel
+async fn dl_illusts_from_channel(
+    client: SemaphoredClient,
+    dest_dir: PathBuf,
+    directory_policy: DirectoryPolicy,
+    mut illust_rx: UnboundedReceiver<u64>,
+) -> Result<()> {
+    let mut set = JoinSet::new();
+
+    // For each illust
+    while let Some(illust_id) = illust_rx.recv().await {
+        set.spawn(dl_one_illust(
+            client.clone(),
+            illust_id,
+            dest_dir.clone(),
+            directory_policy,
+        ));
+    }
+
+    while let Some(r) = set.join_next().await {
+        r??
     }
 
     Ok(())
