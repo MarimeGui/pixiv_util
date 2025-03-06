@@ -1,6 +1,6 @@
 use std::fs::File as StdFile;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::{
     gen_http_client::SemaphoredClient, update_file::UPDATE_FILE, DirectoryPolicy,
@@ -21,7 +21,8 @@ pub async fn download_updates(
     let mut update_file_path = params.directory.clone().unwrap_or_default();
     update_file_path.push(UPDATE_FILE);
 
-    let update_file = StdFile::open(update_file_path)?;
+    let update_file = StdFile::open(update_file_path)
+        .map_err(|e| anyhow!("Failed to open `{}` file: {}", UPDATE_FILE, e))?;
 
     let mode: DownloadIllustModes = serde_json::from_reader(&update_file)?;
 
