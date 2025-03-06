@@ -1,14 +1,11 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use tokio::{sync::mpsc::UnboundedSender, task::JoinSet};
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    gen_http_client::SemaphoredClient, update_file::create_update_file, DirectoryPolicy,
-    DownloadIllustModes,
+    gen_http_client::SemaphoredClient, update_file::create_update_file, DownloadIllustModes,
 };
-
-use super::single::dl_one_illust;
 
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
@@ -38,13 +35,11 @@ pub async fn dl_user_posts(
 pub async fn dl_user_posts_with_tag(
     client: SemaphoredClient,
     dest_dir: PathBuf,
-    directory_policy: DirectoryPolicy,
     make_update_file: bool,
     user_id: u64,
     tag: &str,
+    illust_tx: UnboundedSender<u64>,
 ) -> Result<()> {
-    let mut set = JoinSet::new();
-
     let mut processed = 0;
 
     loop {
@@ -58,12 +53,7 @@ pub async fn dl_user_posts_with_tag(
         .await?;
 
         for work in &body.works {
-            set.spawn(dl_one_illust(
-                client.clone(),
-                work.id,
-                dest_dir.clone(),
-                directory_policy,
-            ));
+            illust_tx.send(work.id)?;
         }
 
         processed += body.works.len();
@@ -72,10 +62,6 @@ pub async fn dl_user_posts_with_tag(
         if processed >= body.total {
             break;
         }
-    }
-
-    while let Some(r) = set.join_next().await {
-        r??
     }
 
     if make_update_file {

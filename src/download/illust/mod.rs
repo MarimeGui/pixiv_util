@@ -82,10 +82,10 @@ pub async fn download_illust(
                 dl_user_posts_with_tag(
                     client,
                     dest_dir.clone(),
-                    params.directory_policy,
                     make_update_file,
                     *user_id,
                     tag,
+                    illust_tx,
                 )
                 .await?
             }
