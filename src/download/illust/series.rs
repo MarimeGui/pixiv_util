@@ -4,14 +4,12 @@ use anyhow::Result;
 use tokio::{fs::create_dir, sync::mpsc::UnboundedSender};
 
 use crate::{
-    gen_http_client::SemaphoredClient, incremental::is_illust_in_files,
-    update_file::create_update_file, DownloadIllustModes,
+    gen_http_client::SemaphoredClient, update_file::create_update_file, DownloadIllustModes,
 };
 
 pub async fn dl_series(
     client: SemaphoredClient,
     mut dest_dir: PathBuf,
-    file_list: Option<Vec<String>>,
     mut create_named_dir: bool,
     make_update_file: bool,
     series_id: u64,
@@ -42,13 +40,6 @@ pub async fn dl_series(
         }
 
         for pos in body.page.series {
-            // Check if file already downloaded
-            if let Some(files) = &file_list {
-                if is_illust_in_files(&pos.work_id.to_string(), files) {
-                    continue;
-                }
-            }
-
             illust_tx.send(pos.work_id)?;
         }
 
