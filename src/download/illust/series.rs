@@ -7,13 +7,15 @@ use crate::{
     gen_http_client::SemaphoredClient, update_file::create_update_file, DownloadIllustModes,
 };
 
+use super::IllustDownload;
+
 pub async fn dl_series(
     client: SemaphoredClient,
     mut dest_dir: PathBuf,
     mut create_named_dir: bool,
     make_update_file: bool,
     series_id: u64,
-    illust_tx: UnboundedSender<u64>,
+    illust_tx: UnboundedSender<IllustDownload>,
 ) -> Result<()> {
     let mut page_index = 1;
     let mut total = 0;
@@ -40,7 +42,10 @@ pub async fn dl_series(
         }
 
         for pos in body.page.series {
-            illust_tx.send(pos.work_id)?;
+            illust_tx.send(IllustDownload {
+                id: pos.work_id,
+                dest_dir: dest_dir.clone(),
+            })?;
         }
 
         if total == body.page.total {

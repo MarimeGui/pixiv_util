@@ -8,13 +8,20 @@ use crate::{download::file::safe_dl, gen_http_client::SemaphoredClient, Director
 const MAX_RETRIES: usize = 3;
 const TIMEOUT: u64 = 120;
 
+/// Information required for downloading an illust
+pub struct IllustDownload {
+    /// ID of the illust to download
+    pub id: u64,
+    /// Destination dir of illust
+    pub dest_dir: PathBuf,
+}
+
 pub async fn dl_one_illust(
     client: SemaphoredClient,
-    illust_id: u64,
-    mut dest_dir: PathBuf,
+    mut illust: IllustDownload,
     directory_policy: DirectoryPolicy,
 ) -> Result<()> {
-    let pages = crate::api_calls::illust_pages::get(client.clone(), illust_id).await?;
+    let pages = crate::api_calls::illust_pages::get(client.clone(), illust.id).await?;
 
     let in_dir = match directory_policy {
         DirectoryPolicy::AlwaysCreate => true,
@@ -24,8 +31,8 @@ pub async fn dl_one_illust(
 
     // If multiple pages, put everything in dir
     if in_dir {
-        create_dir_all(illust_id.to_string()).await?;
-        dest_dir.push(illust_id.to_string());
+        create_dir_all(illust.id.to_string()).await?;
+        illust.dest_dir.push(illust.id.to_string());
     }
 
     let mut set = JoinSet::new();
@@ -35,7 +42,7 @@ pub async fn dl_one_illust(
         set.spawn(safe_dl(
             client.clone(),
             page.urls.original,
-            dest_dir.clone(),
+            illust.dest_dir.clone(),
             MAX_RETRIES,
             Duration::from_secs(TIMEOUT),
         ));

@@ -13,7 +13,7 @@ use std::{
 use anyhow::{anyhow, Result};
 use tokio::{
     spawn,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinSet,
 };
 
@@ -25,11 +25,12 @@ use crate::{
 };
 use individual::dl_individual;
 use series::dl_series;
-use single::dl_one_illust;
+use single::{dl_one_illust, IllustDownload};
 use user_bookmarks::dl_user_bookmarks;
 use user_posts::{dl_user_posts, dl_user_posts_with_tag};
 
-// TODO: Illust MPSC should also have a path specified for illust names and whatnot
+// TODO: Cow for dest path
+// TODO: Add user posts name in path, make sure it will work fine even in updates
 
 pub async fn download_illust(
     params: DownloadIllustParameters,
@@ -56,15 +57,22 @@ pub async fn download_illust(
     let (illust_tx, illust_rx) = unbounded_channel();
     let illust_result = spawn(dl_illusts_from_channel(
         client.clone(),
-        dest_dir.clone(),
         params.directory_policy,
         illust_rx,
         file_list,
     ));
 
+    // Secondary MPSC channel that includes default destination dir if it goes unchanged
+    let (def_path_illust_tx, def_path_illust_rx) = unbounded_channel();
+    let adder_result = spawn(add_default_path(
+        def_path_illust_rx,
+        illust_tx.clone(),
+        dest_dir.clone(),
+    ));
+
     match &params.mode {
         DownloadIllustModes::Individual { illust_ids } => {
-            dl_individual(illust_ids, illust_tx).await?
+            dl_individual(illust_ids, def_path_illust_tx.clone()).await?
         }
         DownloadIllustModes::Series { series_id } => {
             dl_series(
@@ -73,7 +81,7 @@ pub async fn download_illust(
                 create_named_dir,
                 make_update_file,
                 *series_id,
-                illust_tx,
+                illust_tx.clone(),
             )
             .await?
         }
@@ -85,7 +93,7 @@ pub async fn download_illust(
                     make_update_file,
                     *user_id,
                     tag,
-                    illust_tx,
+                    def_path_illust_tx.clone(),
                 )
                 .await?
             }
@@ -95,7 +103,7 @@ pub async fn download_illust(
                     dest_dir.clone(),
                     make_update_file,
                     *user_id,
-                    illust_tx,
+                    def_path_illust_tx.clone(),
                 )
                 .await?
             }
@@ -115,12 +123,39 @@ pub async fn download_illust(
             } else {
                 return Err(anyhow::anyhow!("No user ID specified !"));
             };
-            dl_user_bookmarks(client, dest_dir.clone(), make_update_file, id, illust_tx).await?
+            dl_user_bookmarks(
+                client,
+                dest_dir.clone(),
+                make_update_file,
+                id,
+                def_path_illust_tx.clone(),
+            )
+            .await?
         }
     }
 
+    // Check adder did not error
+    drop(def_path_illust_tx);
+    adder_result.await??;
+
     // Check all illusts were downloaded properly
+    drop(illust_tx);
     illust_result.await??;
+
+    Ok(())
+}
+
+async fn add_default_path(
+    mut def_path_illust_rx: UnboundedReceiver<u64>,
+    illust_tx: UnboundedSender<IllustDownload>,
+    default_path: PathBuf,
+) -> Result<()> {
+    while let Some(id) = def_path_illust_rx.recv().await {
+        illust_tx.send(IllustDownload {
+            id,
+            dest_dir: default_path.clone(),
+        })?;
+    }
 
     Ok(())
 }
@@ -128,9 +163,8 @@ pub async fn download_illust(
 /// Initiates illust downloads coming from MPSC channel
 async fn dl_illusts_from_channel(
     client: SemaphoredClient,
-    dest_dir: PathBuf,
     directory_policy: DirectoryPolicy,
-    mut illust_rx: UnboundedReceiver<u64>,
+    mut illust_rx: UnboundedReceiver<IllustDownload>,
     file_list: Option<Vec<String>>,
 ) -> Result<()> {
     // Arc the file list to prevent useless copies
@@ -143,7 +177,6 @@ async fn dl_illusts_from_channel(
         set.spawn(check_dup_and_dl(
             client.clone(),
             illust_id,
-            dest_dir.clone(),
             directory_policy,
             file_list.clone(),
         ));
@@ -159,20 +192,19 @@ async fn dl_illusts_from_channel(
 /// Checks if an illust is already in destination path and only download if not found
 async fn check_dup_and_dl(
     client: SemaphoredClient,
-    illust_id: u64,
-    dest_dir: PathBuf,
+    illust: IllustDownload,
     directory_policy: DirectoryPolicy,
     file_list: Arc<Option<Vec<String>>>,
 ) -> Result<()> {
     // Check if file is already downloaded
     if let Some(files) = &*file_list {
-        if is_illust_in_files(&illust_id.to_string(), files) {
+        if is_illust_in_files(&illust.id.to_string(), files) {
             return Ok(());
         }
     }
 
     // Proceed to download
-    dl_one_illust(client, illust_id, dest_dir, directory_policy).await
+    dl_one_illust(client, illust, directory_policy).await
 }
 
 /// Checks if it would be wise to create a new directory named after series or user within specified destination directory
