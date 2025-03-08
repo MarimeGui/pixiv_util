@@ -10,7 +10,7 @@ use crate::{
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
 /// Will download all illusts bookmarked by specified user
-pub async fn dl_user_bookmarks(
+pub async fn illusts_from_user_bookmarks(
     client: SemaphoredClient,
     dest_dir: PathBuf,
     make_update_file: bool,

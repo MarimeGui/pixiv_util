@@ -9,7 +9,7 @@ use crate::{
 
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
-pub async fn dl_user_posts(
+pub async fn illusts_from_user_posts(
     client: SemaphoredClient,
     dest_dir: PathBuf,
     make_update_file: bool,
@@ -32,7 +32,7 @@ pub async fn dl_user_posts(
     Ok(())
 }
 
-pub async fn dl_user_posts_with_tag(
+pub async fn illusts_from_user_posts_with_tag(
     client: SemaphoredClient,
     dest_dir: PathBuf,
     make_update_file: bool,

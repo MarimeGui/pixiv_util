@@ -9,7 +9,7 @@ use crate::{
 
 use super::IllustDownload;
 
-pub async fn dl_series(
+pub async fn illusts_from_series(
     client: SemaphoredClient,
     mut dest_dir: PathBuf,
     mut create_named_dir: bool,

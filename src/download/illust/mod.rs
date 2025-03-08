@@ -23,11 +23,11 @@ use crate::{
     user_mgmt::get_user_id,
     DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
 };
-use individual::dl_individual;
-use series::dl_series;
+use individual::illusts_to_mpsc;
+use series::illusts_from_series;
 use single::{dl_one_illust, IllustDownload};
-use user_bookmarks::dl_user_bookmarks;
-use user_posts::{dl_user_posts, dl_user_posts_with_tag};
+use user_bookmarks::illusts_from_user_bookmarks;
+use user_posts::{illusts_from_user_posts, illusts_from_user_posts_with_tag};
 
 // TODO: Cow for dest path
 // TODO: Add user posts name in path, make sure it will work fine even in updates
@@ -38,7 +38,7 @@ pub async fn download_illust(
     cookie: Option<String>,
 ) -> Result<()> {
     // If there is a specified path, use it, otherwise use blank for current dir
-    let dest_dir = params.output_directory.unwrap_or_default();
+    let dest_dir = params.output_directory.clone().unwrap_or_default();
 
     // If incremental is active, list all files
     let file_list = if let Some(o) = &params.incremental {
@@ -53,6 +53,30 @@ pub async fn download_illust(
     // Should we create an update file
     let make_update_file = !params.no_update_file & params.incremental.is_none();
 
+    download_all(
+        params,
+        client,
+        cookie,
+        dest_dir,
+        file_list,
+        create_named_dir,
+        make_update_file,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Download all illusts
+async fn download_all(
+    params: DownloadIllustParameters,
+    client: SemaphoredClient,
+    cookie: Option<String>,
+    dest_dir: PathBuf,
+    file_list: Option<Vec<String>>,
+    create_named_dir: bool,
+    make_update_file: bool,
+) -> Result<()> {
     // Create MPSC channel for illust ids and spawn task to begin download
     let (illust_tx, illust_rx) = unbounded_channel();
     let illust_result = spawn(dl_illusts_from_channel(
@@ -70,12 +94,46 @@ pub async fn download_illust(
         dest_dir.clone(),
     ));
 
+    illusts_from_source(
+        &params,
+        client,
+        cookie,
+        dest_dir,
+        create_named_dir,
+        make_update_file,
+        illust_tx.clone(),
+        def_path_illust_tx.clone(),
+    )
+    .await?;
+
+    // Check adder did not error
+    drop(def_path_illust_tx);
+    adder_result.await??;
+
+    // Check all illusts were downloaded properly
+    drop(illust_tx);
+    illust_result.await??;
+
+    Ok(())
+}
+
+/// Push all illusts from specified source to MPSCs
+async fn illusts_from_source(
+    params: &DownloadIllustParameters,
+    client: SemaphoredClient,
+    cookie: Option<String>,
+    dest_dir: PathBuf,
+    create_named_dir: bool,
+    make_update_file: bool,
+    illust_tx: UnboundedSender<IllustDownload>,
+    def_path_illust_tx: UnboundedSender<u64>,
+) -> Result<()> {
     match &params.mode {
         DownloadIllustModes::Individual { illust_ids } => {
-            dl_individual(illust_ids, def_path_illust_tx.clone()).await?
+            illusts_to_mpsc(illust_ids, def_path_illust_tx.clone()).await?
         }
         DownloadIllustModes::Series { series_id } => {
-            dl_series(
+            illusts_from_series(
                 client,
                 dest_dir.clone(),
                 create_named_dir,
@@ -87,7 +145,7 @@ pub async fn download_illust(
         }
         DownloadIllustModes::UserPosts { tag, user_id } => match tag {
             Some(tag) => {
-                dl_user_posts_with_tag(
+                illusts_from_user_posts_with_tag(
                     client,
                     dest_dir.clone(),
                     make_update_file,
@@ -98,7 +156,7 @@ pub async fn download_illust(
                 .await?
             }
             None => {
-                dl_user_posts(
+                illusts_from_user_posts(
                     client,
                     dest_dir.clone(),
                     make_update_file,
@@ -123,7 +181,7 @@ pub async fn download_illust(
             } else {
                 return Err(anyhow::anyhow!("No user ID specified !"));
             };
-            dl_user_bookmarks(
+            illusts_from_user_bookmarks(
                 client,
                 dest_dir.clone(),
                 make_update_file,
@@ -133,14 +191,6 @@ pub async fn download_illust(
             .await?
         }
     }
-
-    // Check adder did not error
-    drop(def_path_illust_tx);
-    adder_result.await??;
-
-    // Check all illusts were downloaded properly
-    drop(illust_tx);
-    illust_result.await??;
 
     Ok(())
 }
