@@ -5,6 +5,7 @@ mod user_bookmarks;
 mod user_posts;
 
 use std::{
+    env::current_dir,
     fs::read_dir,
     path::{Path, PathBuf},
     sync::Arc,
@@ -20,6 +21,7 @@ use tokio::{
 use crate::{
     gen_http_client::SemaphoredClient,
     incremental::{is_illust_in_files, list_all_files},
+    update_file::create_update_file,
     user_mgmt::get_user_id,
     DirectoryPolicy, DownloadIllustModes, DownloadIllustParameters,
 };
@@ -29,171 +31,244 @@ use single::{dl_one_illust, IllustDownload};
 use user_bookmarks::illusts_from_user_bookmarks;
 use user_posts::{illusts_from_user_posts, illusts_from_user_posts_with_tag};
 
-// TODO: Cow for dest path
-// TODO: Add user posts name in path, make sure it will work fine even in updates
+// TODO: Update file is always created in base_dir, should take into account named dir
+// TODO: Named dir should be propagated using watch then.
+
+// -----
 
 pub async fn download_illust(
     params: DownloadIllustParameters,
     client: SemaphoredClient,
     cookie: Option<String>,
 ) -> Result<()> {
-    // If there is a specified path, use it, otherwise use blank for current dir
-    let dest_dir = params.output_directory.clone().unwrap_or_default();
-
-    // If incremental is active, list all files
-    let file_list = if let Some(o) = &params.incremental {
-        Some(list_all_files(o.as_ref().unwrap_or(&dest_dir))?)
-    } else {
-        None
-    };
-
-    // Check if we're going to create a named sub directory
-    let create_named_dir = create_named_dir(params.disable_named_dir, &params.mode, &dest_dir)?;
-
-    // Should we create an update file
-    let make_update_file = !params.no_update_file & params.incremental.is_none();
-
-    download_all(
-        params,
-        client,
-        cookie,
-        dest_dir,
-        file_list,
-        create_named_dir,
-        make_update_file,
-    )
-    .await?;
+    let internal_params = InternalDownloadParams::process_args(params, client, cookie)?;
+    internal_params.download_all().await?;
+    internal_params.create_update_file()?;
 
     Ok(())
 }
 
-/// Download all illusts
-async fn download_all(
-    params: DownloadIllustParameters,
+// -----
+
+struct InternalDownloadParams {
+    /// Parameters for querying API and get illust ids
+    source: DownloadSource,
+
     client: SemaphoredClient,
-    cookie: Option<String>,
-    dest_dir: PathBuf,
-    file_list: Option<Vec<String>>,
+
+    /// Used for deduplication
+    file_list: Option<Arc<Vec<String>>>,
+
+    /// (1) Where all illusts will end up under
+    base_dest: PathBuf,
+    /// (2) When downloading a collection of illusts (e.g. series), should a new directory named after the collection be created
     create_named_dir: bool,
+    /// (3) If each illust will have its own subdir or not
+    directory_policy: DirectoryPolicy,
+
+    /// After download is complete, create an update file ?
     make_update_file: bool,
-) -> Result<()> {
-    // Create MPSC channel for illust ids and spawn task to begin download
-    let (illust_tx, illust_rx) = unbounded_channel();
-    let illust_result = spawn(dl_illusts_from_channel(
-        client.clone(),
-        params.directory_policy,
-        illust_rx,
-        file_list,
-    ));
-
-    // Secondary MPSC channel that includes default destination dir if it goes unchanged
-    let (def_path_illust_tx, def_path_illust_rx) = unbounded_channel();
-    let adder_result = spawn(add_default_path(
-        def_path_illust_rx,
-        illust_tx.clone(),
-        dest_dir.clone(),
-    ));
-
-    illusts_from_source(
-        &params,
-        client,
-        cookie,
-        dest_dir,
-        create_named_dir,
-        make_update_file,
-        illust_tx.clone(),
-        def_path_illust_tx.clone(),
-    )
-    .await?;
-
-    // Check adder did not error
-    drop(def_path_illust_tx);
-    adder_result.await??;
-
-    // Check all illusts were downloaded properly
-    drop(illust_tx);
-    illust_result.await??;
-
-    Ok(())
 }
 
-/// Push all illusts from specified source to MPSCs
-async fn illusts_from_source(
-    params: &DownloadIllustParameters,
-    client: SemaphoredClient,
-    cookie: Option<String>,
-    dest_dir: PathBuf,
-    create_named_dir: bool,
-    make_update_file: bool,
-    illust_tx: UnboundedSender<IllustDownload>,
-    def_path_illust_tx: UnboundedSender<u64>,
-) -> Result<()> {
-    match &params.mode {
-        DownloadIllustModes::Individual { illust_ids } => {
-            illusts_to_mpsc(illust_ids, def_path_illust_tx.clone()).await?
-        }
-        DownloadIllustModes::Series { series_id } => {
-            illusts_from_series(
-                client,
-                dest_dir.clone(),
-                create_named_dir,
-                make_update_file,
-                *series_id,
-                illust_tx.clone(),
-            )
-            .await?
-        }
-        DownloadIllustModes::UserPosts { tag, user_id } => match tag {
-            Some(tag) => {
+impl InternalDownloadParams {
+    /// Will take arguments given by user from CLI, process them for download
+    fn process_args(
+        params: DownloadIllustParameters,
+        client: SemaphoredClient,
+        cookie: Option<String>,
+    ) -> Result<InternalDownloadParams> {
+        // If there is a specified path, use it, otherwise use blank for current dir
+        let base_dest = params.output_directory.clone().unwrap_or(current_dir()?);
+
+        // If incremental is active, list all files
+        let file_list = if let Some(o) = &params.incremental {
+            Some(Arc::new(list_all_files(o.as_ref().unwrap_or(&base_dest))?))
+        } else {
+            None
+        };
+
+        // Check if we're going to create a named sub directory
+        let create_named_dir =
+            create_named_dir(params.disable_named_dir, &params.mode, &base_dest)?;
+
+        // Should we create an update file
+        let make_update_file = !params.no_update_file & params.incremental.is_none();
+
+        // Process arguments
+        let mode = DownloadSource::from_args(params.mode, cookie)?;
+
+        Ok(InternalDownloadParams {
+            source: mode,
+            client,
+            file_list,
+            base_dest,
+            create_named_dir,
+            directory_policy: params.directory_policy,
+            make_update_file,
+        })
+    }
+
+    /// Download all files
+    async fn download_all(&self) -> Result<()> {
+        // Create MPSC channel for illust ids and spawn task to begin download
+        let (illust_tx, illust_rx) = unbounded_channel();
+        let illust_result = spawn(dl_illusts_from_channel(
+            self.client.clone(),
+            self.directory_policy,
+            illust_rx,
+            self.file_list.clone(),
+        ));
+
+        // Secondary MPSC channel that includes default destination dir if it goes unchanged
+        let (def_path_illust_tx, def_path_illust_rx) = unbounded_channel();
+        let adder_result = spawn(add_default_path(
+            def_path_illust_rx,
+            illust_tx.clone(),
+            self.base_dest.clone(),
+        ));
+
+        // Feed MPSCs with illust ids coming from set source
+        self.feed_mpsc_from_source(illust_tx.clone(), def_path_illust_tx.clone())
+            .await?;
+
+        // Check adder did not error
+        drop(def_path_illust_tx);
+        adder_result.await??;
+
+        // Check all illusts were downloaded properly
+        drop(illust_tx);
+        illust_result.await??;
+
+        Ok(())
+    }
+
+    /// Get illust ids from API and feed them to MPSC for download
+    async fn feed_mpsc_from_source(
+        &self,
+        illust_tx: UnboundedSender<IllustDownload>,
+        def_path_illust_tx: UnboundedSender<u64>,
+    ) -> Result<()> {
+        match &self.source {
+            DownloadSource::Individual { illust_ids } => {
+                illusts_to_mpsc(illust_ids, def_path_illust_tx).await?
+            }
+            DownloadSource::Series { series_id } => {
+                illusts_from_series(
+                    self.client.clone(),
+                    self.base_dest.clone(),
+                    self.create_named_dir,
+                    *series_id,
+                    illust_tx,
+                )
+                .await?
+            }
+            DownloadSource::UserPosts { user_id } => {
+                illusts_from_user_posts(self.client.clone(), *user_id, def_path_illust_tx).await?
+            }
+            DownloadSource::UserPostsTag { user_id, tag } => {
                 illusts_from_user_posts_with_tag(
-                    client,
-                    dest_dir.clone(),
-                    make_update_file,
+                    self.client.clone(),
                     *user_id,
                     tag,
-                    def_path_illust_tx.clone(),
+                    def_path_illust_tx,
                 )
                 .await?
             }
-            None => {
-                illusts_from_user_posts(
-                    client,
-                    dest_dir.clone(),
-                    make_update_file,
-                    *user_id,
-                    def_path_illust_tx.clone(),
-                )
-                .await?
+            DownloadSource::UserBookmarks { user_id } => {
+                illusts_from_user_bookmarks(self.client.clone(), *user_id, def_path_illust_tx)
+                    .await?
             }
-        },
-        DownloadIllustModes::UserBookmarks { user_id } => {
-            // Get user id to use for downloads
-            let id = if let Some(i) = user_id {
-                // Specified directly by command line
-                *i
-            } else if let Some(c) = cookie {
-                if let Some(i) = get_user_id(&c) {
-                    // Extracted from the cookie
-                    i
+        }
+
+        Ok(())
+    }
+
+    fn create_update_file(&self) -> Result<()> {
+        // Check if prevented by arguments
+        if !self.make_update_file {
+            return Ok(());
+        }
+
+        // Only keep collections as they're the only ones that may get updated later
+        if !self.source.is_collection() {
+            return Ok(());
+        }
+
+        let arg = self.source.to_arg();
+
+        create_update_file(&self.base_dest, &arg)
+    }
+}
+
+enum DownloadSource {
+    Individual { illust_ids: Vec<u64> },
+    Series { series_id: u64 },
+    UserPosts { user_id: u64 },
+    UserPostsTag { user_id: u64, tag: String },
+    UserBookmarks { user_id: u64 },
+}
+
+impl DownloadSource {
+    fn from_args(args: DownloadIllustModes, cookie: Option<String>) -> Result<DownloadSource> {
+        Ok(match args {
+            DownloadIllustModes::Individual { illust_ids } => {
+                DownloadSource::Individual { illust_ids }
+            }
+            DownloadIllustModes::Series { series_id } => DownloadSource::Series { series_id },
+            DownloadIllustModes::UserPosts { tag, user_id } => {
+                if let Some(tag) = tag {
+                    DownloadSource::UserPostsTag { user_id, tag }
                 } else {
-                    return Err(anyhow::anyhow!("Couldn't get user id from cookie !"));
+                    DownloadSource::UserPosts { user_id }
                 }
-            } else {
-                return Err(anyhow::anyhow!("No user ID specified !"));
-            };
-            illusts_from_user_bookmarks(
-                client,
-                dest_dir.clone(),
-                make_update_file,
-                id,
-                def_path_illust_tx.clone(),
-            )
-            .await?
+            }
+            DownloadIllustModes::UserBookmarks { user_id } => {
+                if let Some(user_id) = user_id {
+                    // Specified directly by command line
+                    DownloadSource::UserBookmarks { user_id }
+                } else if let Some(c) = cookie {
+                    if let Some(i) = get_user_id(&c) {
+                        // Extracted from the cookie
+                        DownloadSource::UserBookmarks { user_id: i }
+                    } else {
+                        return Err(anyhow::anyhow!("Couldn't get user id from cookie !"));
+                    }
+                } else {
+                    return Err(anyhow::anyhow!("No user ID specified !"));
+                }
+            }
+        })
+    }
+
+    /// Convert into a arg-like struct containing exact parameters used during download
+    fn to_arg(&self) -> DownloadIllustModes {
+        match self {
+            DownloadSource::Individual { illust_ids } => DownloadIllustModes::Individual {
+                illust_ids: illust_ids.clone(),
+            },
+            DownloadSource::Series { series_id } => DownloadIllustModes::Series {
+                series_id: *series_id,
+            },
+            DownloadSource::UserPosts { user_id } => DownloadIllustModes::UserPosts {
+                tag: None,
+                user_id: *user_id,
+            },
+            DownloadSource::UserPostsTag { user_id, tag } => DownloadIllustModes::UserPosts {
+                tag: Some(tag.clone()),
+                user_id: *user_id,
+            },
+            DownloadSource::UserBookmarks { user_id } => DownloadIllustModes::UserBookmarks {
+                user_id: Some(*user_id),
+            },
         }
     }
 
-    Ok(())
+    fn is_collection(&self) -> bool {
+        !matches!(self, DownloadSource::Individual { illust_ids: _ })
+    }
 }
+
+// -----
 
 async fn add_default_path(
     mut def_path_illust_rx: UnboundedReceiver<u64>,
@@ -215,21 +290,24 @@ async fn dl_illusts_from_channel(
     client: SemaphoredClient,
     directory_policy: DirectoryPolicy,
     mut illust_rx: UnboundedReceiver<IllustDownload>,
-    file_list: Option<Vec<String>>,
+    file_list: Option<Arc<Vec<String>>>,
 ) -> Result<()> {
-    // Arc the file list to prevent useless copies
-    let file_list = Arc::new(file_list);
-
     let mut set = JoinSet::new();
 
-    // For each illust
-    while let Some(illust_id) = illust_rx.recv().await {
-        set.spawn(check_dup_and_dl(
-            client.clone(),
-            illust_id,
-            directory_policy,
-            file_list.clone(),
-        ));
+    // For all received illust ids
+    while let Some(illust) = illust_rx.recv().await {
+        if let Some(fl) = file_list.clone() {
+            // If there is a file list, check duplicates before dl
+            set.spawn(check_dup_and_dl(
+                client.clone(),
+                illust,
+                directory_policy,
+                fl,
+            ));
+        } else {
+            // Otherwise, directly perform download
+            set.spawn(dl_one_illust(client.clone(), illust, directory_policy));
+        }
     }
 
     while let Some(r) = set.join_next().await {
@@ -244,13 +322,11 @@ async fn check_dup_and_dl(
     client: SemaphoredClient,
     illust: IllustDownload,
     directory_policy: DirectoryPolicy,
-    file_list: Arc<Option<Vec<String>>>,
+    file_list: Arc<Vec<String>>,
 ) -> Result<()> {
     // Check if file is already downloaded
-    if let Some(files) = &*file_list {
-        if is_illust_in_files(&illust.id.to_string(), files) {
-            return Ok(());
-        }
+    if is_illust_in_files(&illust.id.to_string(), &file_list) {
+        return Ok(());
     }
 
     // Proceed to download

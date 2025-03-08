@@ -1,19 +1,13 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use tokio::{sync::mpsc::UnboundedSender, task::JoinSet};
 
-use crate::{
-    gen_http_client::SemaphoredClient, update_file::create_update_file, DownloadIllustModes,
-};
+use crate::gen_http_client::SemaphoredClient;
 
 const ILLUSTS_PER_PAGE: usize = 100; // Maximum allowed by API
 
 /// Will download all illusts bookmarked by specified user
 pub async fn illusts_from_user_bookmarks(
     client: SemaphoredClient,
-    dest_dir: PathBuf,
-    make_update_file: bool,
     user_id: u64,
     illust_tx: UnboundedSender<u64>,
 ) -> Result<()> {
@@ -37,15 +31,6 @@ pub async fn illusts_from_user_bookmarks(
     drop(illust_tx);
     while let Some(r) = set.join_next().await {
         r??;
-    }
-
-    if make_update_file {
-        create_update_file(
-            &dest_dir,
-            &DownloadIllustModes::UserBookmarks {
-                user_id: Some(user_id),
-            },
-        )?;
     }
 
     Ok(())

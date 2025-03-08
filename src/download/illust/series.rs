@@ -3,9 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use tokio::{fs::create_dir, sync::mpsc::UnboundedSender};
 
-use crate::{
-    gen_http_client::SemaphoredClient, update_file::create_update_file, DownloadIllustModes,
-};
+use crate::gen_http_client::SemaphoredClient;
 
 use super::IllustDownload;
 
@@ -13,7 +11,6 @@ pub async fn illusts_from_series(
     client: SemaphoredClient,
     mut dest_dir: PathBuf,
     mut create_named_dir: bool,
-    make_update_file: bool,
     series_id: u64,
     illust_tx: UnboundedSender<IllustDownload>,
 ) -> Result<()> {
@@ -51,10 +48,6 @@ pub async fn illusts_from_series(
         if total == body.page.total {
             break;
         }
-    }
-
-    if make_update_file {
-        create_update_file(&dest_dir, &DownloadIllustModes::Series { series_id })?;
     }
 
     Ok(())
