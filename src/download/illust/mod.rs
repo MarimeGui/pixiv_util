@@ -13,8 +13,12 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use tokio::{
+    fs::create_dir,
     spawn,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        oneshot::{self, Sender},
+    },
     task::JoinSet,
 };
 
@@ -27,12 +31,9 @@ use crate::{
 };
 use individual::illusts_to_mpsc;
 use series::illusts_from_series;
-use single::{dl_one_illust, IllustDownload};
+use single::dl_one_illust;
 use user_bookmarks::illusts_from_user_bookmarks;
 use user_posts::{illusts_from_user_posts, illusts_from_user_posts_with_tag};
-
-// TODO: Update file is always created in base_dir, should take into account named dir
-// TODO: Named dir should be propagated using watch then.
 
 // -----
 
@@ -41,7 +42,7 @@ pub async fn download_illust(
     client: SemaphoredClient,
     cookie: Option<String>,
 ) -> Result<()> {
-    let internal_params = InternalDownloadParams::process_args(params, client, cookie)?;
+    let mut internal_params = InternalDownloadParams::process_args(params, client, cookie)?;
     internal_params.download_all().await?;
     internal_params.create_update_file()?;
 
@@ -49,6 +50,8 @@ pub async fn download_illust(
 }
 
 // -----
+
+// TODO: I don't really like that struct after all... Maybe a more linear way of doing things is better
 
 struct InternalDownloadParams {
     /// Parameters for querying API and get illust ids
@@ -65,6 +68,9 @@ struct InternalDownloadParams {
     create_named_dir: bool,
     /// (3) If each illust will have its own subdir or not
     directory_policy: DirectoryPolicy,
+
+    /// Path where illusts will be downloaded, i.e., base_dest and named dir joined after name of collection was retrieved
+    dest_dir: Option<PathBuf>,
 
     /// After download is complete, create an update file ?
     make_update_file: bool,
@@ -89,7 +95,7 @@ impl InternalDownloadParams {
 
         // Check if we're going to create a named sub directory
         let create_named_dir =
-            create_named_dir(params.disable_named_dir, &params.mode, &base_dest)?;
+            should_create_named_dir(params.disable_named_dir, &params.mode, &base_dest)?;
 
         // Should we create an update file
         let make_update_file = !params.no_update_file & params.incremental.is_none();
@@ -104,81 +110,59 @@ impl InternalDownloadParams {
             base_dest,
             create_named_dir,
             directory_policy: params.directory_policy,
+            dest_dir: None,
             make_update_file,
         })
     }
 
     /// Download all files
-    async fn download_all(&self) -> Result<()> {
-        // Create MPSC channel for illust ids and spawn task to begin download
-        let (illust_tx, illust_rx) = unbounded_channel();
-        let illust_result = spawn(dl_illusts_from_channel(
-            self.client.clone(),
-            self.directory_policy,
-            illust_rx,
-            self.file_list.clone(),
-        ));
+    async fn download_all(&mut self) -> Result<()> {
+        // Channel for passing illust ids
+        let (illust_id_tx, illust_id_rx) = mpsc::unbounded_channel();
 
-        // Secondary MPSC channel that includes default destination dir if it goes unchanged
-        let (def_path_illust_tx, def_path_illust_rx) = unbounded_channel();
-        let adder_result = spawn(add_default_path(
-            def_path_illust_rx,
-            illust_tx.clone(),
-            self.base_dest.clone(),
-        ));
+        // Channel for propagating name of collection
+        let (name_tx, name_rx) = if self.create_named_dir {
+            let channel = oneshot::channel();
+            (Some(channel.0), Some(channel.1))
+        } else {
+            (None, None)
+        };
 
         // Feed MPSCs with illust ids coming from set source
-        self.feed_mpsc_from_source(illust_tx.clone(), def_path_illust_tx.clone())
-            .await?;
+        let feed_task = spawn(feed_mpsc_from_source(
+            self.source.clone(),
+            self.client.clone(),
+            illust_id_tx,
+            name_tx,
+        ));
 
-        // Check adder did not error
-        drop(def_path_illust_tx);
-        adder_result.await??;
+        // Get name of collection
+        let name = if let Some(rx) = name_rx {
+            rx.await?
+        } else {
+            None
+        };
 
-        // Check all illusts were downloaded properly
-        drop(illust_tx);
-        illust_result.await??;
+        // Get full dest dir, create dir if necessary
+        let dest_dir = if let Some(name) = name {
+            let new_path = self.base_dest.join(name);
+            create_dir(&new_path).await?;
+            new_path
+        } else {
+            self.base_dest.to_owned()
+        };
+        self.dest_dir = Some(dest_dir.clone());
 
-        Ok(())
-    }
-
-    /// Get illust ids from API and feed them to MPSC for download
-    async fn feed_mpsc_from_source(
-        &self,
-        illust_tx: UnboundedSender<IllustDownload>,
-        def_path_illust_tx: UnboundedSender<u64>,
-    ) -> Result<()> {
-        match &self.source {
-            DownloadSource::Individual { illust_ids } => {
-                illusts_to_mpsc(illust_ids, def_path_illust_tx).await?
-            }
-            DownloadSource::Series { series_id } => {
-                illusts_from_series(
-                    self.client.clone(),
-                    self.base_dest.clone(),
-                    self.create_named_dir,
-                    *series_id,
-                    illust_tx,
-                )
-                .await?
-            }
-            DownloadSource::UserPosts { user_id } => {
-                illusts_from_user_posts(self.client.clone(), *user_id, def_path_illust_tx).await?
-            }
-            DownloadSource::UserPostsTag { user_id, tag } => {
-                illusts_from_user_posts_with_tag(
-                    self.client.clone(),
-                    *user_id,
-                    tag,
-                    def_path_illust_tx,
-                )
-                .await?
-            }
-            DownloadSource::UserBookmarks { user_id } => {
-                illusts_from_user_bookmarks(self.client.clone(), *user_id, def_path_illust_tx)
-                    .await?
-            }
-        }
+        // Download illusts coming from MPSC
+        dl_illusts_from_channel(
+            self.client.clone(),
+            self.directory_policy,
+            illust_id_rx,
+            dest_dir,
+            self.file_list.clone(),
+        )
+        .await?;
+        feed_task.await??;
 
         Ok(())
     }
@@ -196,10 +180,13 @@ impl InternalDownloadParams {
 
         let arg = self.source.to_arg();
 
-        create_update_file(&self.base_dest, &arg)
+        let dest_dir = self.dest_dir.clone().unwrap_or(self.base_dest.clone());
+
+        create_update_file(&dest_dir, &arg)
     }
 }
 
+#[derive(Clone)]
 enum DownloadSource {
     Individual { illust_ids: Vec<u64> },
     Series { series_id: u64 },
@@ -270,16 +257,45 @@ impl DownloadSource {
 
 // -----
 
-async fn add_default_path(
-    mut def_path_illust_rx: UnboundedReceiver<u64>,
-    illust_tx: UnboundedSender<IllustDownload>,
-    default_path: PathBuf,
+/// Get illust ids from API and feed them to MPSC for download
+async fn feed_mpsc_from_source(
+    source: DownloadSource,
+    client: SemaphoredClient,
+    illust_id_tx: UnboundedSender<u64>,
+    name_tx: Option<Sender<Option<String>>>,
 ) -> Result<()> {
-    while let Some(id) = def_path_illust_rx.recv().await {
-        illust_tx.send(IllustDownload {
-            id,
-            dest_dir: default_path.clone(),
-        })?;
+    match source {
+        DownloadSource::Individual { illust_ids } => {
+            if let Some(tx) = name_tx {
+                tx.send(None)
+                    .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
+            }
+            illusts_to_mpsc(&illust_ids, illust_id_tx).await?
+        }
+        DownloadSource::Series { series_id } => {
+            illusts_from_series(client, series_id, illust_id_tx, name_tx).await?
+        }
+        DownloadSource::UserPosts { user_id } => {
+            if let Some(tx) = name_tx {
+                tx.send(None)
+                    .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
+            }
+            illusts_from_user_posts(client, user_id, illust_id_tx).await?
+        }
+        DownloadSource::UserPostsTag { user_id, tag } => {
+            if let Some(tx) = name_tx {
+                tx.send(None)
+                    .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
+            }
+            illusts_from_user_posts_with_tag(client, user_id, &tag, illust_id_tx).await?
+        }
+        DownloadSource::UserBookmarks { user_id } => {
+            if let Some(tx) = name_tx {
+                tx.send(None)
+                    .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
+            }
+            illusts_from_user_bookmarks(client, user_id, illust_id_tx).await?
+        }
     }
 
     Ok(())
@@ -289,24 +305,31 @@ async fn add_default_path(
 async fn dl_illusts_from_channel(
     client: SemaphoredClient,
     directory_policy: DirectoryPolicy,
-    mut illust_rx: UnboundedReceiver<IllustDownload>,
+    mut illust_rx: UnboundedReceiver<u64>,
+    dest_dir: PathBuf,
     file_list: Option<Arc<Vec<String>>>,
 ) -> Result<()> {
     let mut set = JoinSet::new();
 
     // For all received illust ids
-    while let Some(illust) = illust_rx.recv().await {
-        if let Some(fl) = file_list.clone() {
+    while let Some(illust_id) = illust_rx.recv().await {
+        if let Some(fl) = &file_list {
             // If there is a file list, check duplicates before dl
             set.spawn(check_dup_and_dl(
                 client.clone(),
-                illust,
+                illust_id,
+                dest_dir.clone(),
                 directory_policy,
-                fl,
+                fl.clone(),
             ));
         } else {
             // Otherwise, directly perform download
-            set.spawn(dl_one_illust(client.clone(), illust, directory_policy));
+            set.spawn(dl_one_illust(
+                client.clone(),
+                illust_id,
+                dest_dir.clone(),
+                directory_policy,
+            ));
         }
     }
 
@@ -320,21 +343,22 @@ async fn dl_illusts_from_channel(
 /// Checks if an illust is already in destination path and only download if not found
 async fn check_dup_and_dl(
     client: SemaphoredClient,
-    illust: IllustDownload,
+    illust_id: u64,
+    dest_dir: PathBuf,
     directory_policy: DirectoryPolicy,
     file_list: Arc<Vec<String>>,
 ) -> Result<()> {
     // Check if file is already downloaded
-    if is_illust_in_files(&illust.id.to_string(), &file_list) {
+    if is_illust_in_files(&illust_id.to_string(), &file_list) {
         return Ok(());
     }
 
     // Proceed to download
-    dl_one_illust(client, illust, directory_policy).await
+    dl_one_illust(client, illust_id, dest_dir, directory_policy).await
 }
 
 /// Checks if it would be wise to create a new directory named after series or user within specified destination directory
-fn create_named_dir(
+fn should_create_named_dir(
     creation_disabled: bool,
     dl_mode: &DownloadIllustModes,
     dest_dir: &Path,

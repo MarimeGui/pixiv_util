@@ -1,18 +1,13 @@
-use std::path::PathBuf;
-
-use anyhow::Result;
-use tokio::{fs::create_dir, sync::mpsc::UnboundedSender};
+use anyhow::{anyhow, Result};
+use tokio::sync::{mpsc::UnboundedSender, oneshot::Sender};
 
 use crate::gen_http_client::SemaphoredClient;
 
-use super::IllustDownload;
-
 pub async fn illusts_from_series(
     client: SemaphoredClient,
-    mut dest_dir: PathBuf,
-    mut create_named_dir: bool,
     series_id: u64,
-    illust_tx: UnboundedSender<IllustDownload>,
+    illust_id_tx: UnboundedSender<u64>,
+    mut name_tx: Option<Sender<Option<String>>>,
 ) -> Result<()> {
     let mut page_index = 1;
     let mut total = 0;
@@ -23,26 +18,26 @@ pub async fn illusts_from_series(
 
         total += body.page.series.len();
 
-        // Modify dest path if required
-        if create_named_dir {
-            // If no series info for some reason, fail silently
-            if let Some(info) = body.illust_series.first() {
+        // Get series name
+        if let Some(tx) = name_tx {
+            // Try to get series info
+            let to_send = if let Some(info) = body.illust_series.first() {
                 // Make sure title isn't empty
                 if !info.title.is_empty() {
-                    // Append dir
-                    dest_dir.push(info.title.clone());
-                    // Create dir
-                    create_dir(&dest_dir).await?;
+                    Some(info.title.clone())
+                } else {
+                    None
                 }
-            }
-            create_named_dir = false;
+            } else {
+                None
+            };
+            tx.send(to_send)
+                .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
+            name_tx = None;
         }
 
         for pos in body.page.series {
-            illust_tx.send(IllustDownload {
-                id: pos.work_id,
-                dest_dir: dest_dir.clone(),
-            })?;
+            illust_id_tx.send(pos.work_id)?;
         }
 
         if total == body.page.total {
