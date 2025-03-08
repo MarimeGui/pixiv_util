@@ -147,8 +147,17 @@ pub enum DownloadIllustModes {
         #[arg(value_parser = parse_user_id)]
         user_id: u64,
     },
-    /// Download all posts liked/bookmarked by a user. If the ID is not specified, will download the current user's
-    UserBookmarks { user_id: Option<u64> },
+    /// Download all posts publicly liked/hearted/bookmarked by a user
+    UserBookmarks { user_id: u64 },
+    /// Download all posts liked/hearted/bookmarked by the currently logged-in user
+    OwnBookmarks {
+        /// Download publicly bookmarked posts
+        #[arg(long)]
+        public: bool,
+        /// Download privately bookmarked posts
+        #[arg(long)]
+        private: bool,
+    },
 }
 
 #[derive(Parser, Debug)]

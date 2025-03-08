@@ -188,11 +188,27 @@ impl InternalDownloadParams {
 
 #[derive(Clone)]
 enum DownloadSource {
-    Individual { illust_ids: Vec<u64> },
-    Series { series_id: u64 },
-    UserPosts { user_id: u64 },
-    UserPostsTag { user_id: u64, tag: String },
-    UserBookmarks { user_id: u64 },
+    Individual {
+        illust_ids: Vec<u64>,
+    },
+    Series {
+        series_id: u64,
+    },
+    UserPosts {
+        user_id: u64,
+    },
+    UserPostsTag {
+        user_id: u64,
+        tag: String,
+    },
+    UserBookmarks {
+        user_id: u64,
+    },
+    OwnBookmarks {
+        user_id: u64,
+        public: bool,
+        private: bool,
+    },
 }
 
 impl DownloadSource {
@@ -210,18 +226,28 @@ impl DownloadSource {
                 }
             }
             DownloadIllustModes::UserBookmarks { user_id } => {
-                if let Some(user_id) = user_id {
-                    // Specified directly by command line
-                    DownloadSource::UserBookmarks { user_id }
-                } else if let Some(c) = cookie {
+                DownloadSource::UserBookmarks { user_id }
+            }
+            DownloadIllustModes::OwnBookmarks { public, private } => {
+                if !public & !private {
+                    return Err(anyhow::anyhow!(
+                        "Neither Public nor Private was selected for download !"
+                    ));
+                }
+
+                if let Some(c) = cookie {
                     if let Some(i) = get_user_id(&c) {
                         // Extracted from the cookie
-                        DownloadSource::UserBookmarks { user_id: i }
+                        DownloadSource::OwnBookmarks {
+                            user_id: i,
+                            public,
+                            private,
+                        }
                     } else {
                         return Err(anyhow::anyhow!("Couldn't get user id from cookie !"));
                     }
                 } else {
-                    return Err(anyhow::anyhow!("No user ID specified !"));
+                    return Err(anyhow::anyhow!("No user cookie available !"));
                 }
             }
         })
@@ -244,8 +270,16 @@ impl DownloadSource {
                 tag: Some(tag.clone()),
                 user_id: *user_id,
             },
-            DownloadSource::UserBookmarks { user_id } => DownloadIllustModes::UserBookmarks {
-                user_id: Some(*user_id),
+            DownloadSource::UserBookmarks { user_id } => {
+                DownloadIllustModes::UserBookmarks { user_id: *user_id }
+            }
+            DownloadSource::OwnBookmarks {
+                user_id: _,
+                public,
+                private,
+            } => DownloadIllustModes::OwnBookmarks {
+                public: *public,
+                private: *private,
             },
         }
     }
@@ -294,7 +328,18 @@ async fn feed_mpsc_from_source(
                 tx.send(None)
                     .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
             }
-            illusts_from_user_bookmarks(client, user_id, illust_id_tx).await?
+            illusts_from_user_bookmarks(client, user_id, illust_id_tx, true, false).await?
+        }
+        DownloadSource::OwnBookmarks {
+            user_id,
+            public,
+            private,
+        } => {
+            if let Some(tx) = name_tx {
+                tx.send(None)
+                    .map_err(|e| anyhow!("Oneshot channel failed: {:?}", e))?;
+            }
+            illusts_from_user_bookmarks(client, user_id, illust_id_tx, public, private).await?
         }
     }
 

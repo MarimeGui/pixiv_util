@@ -8,15 +8,34 @@ pub async fn get(
     user_id: u64,
     offset: usize,
     limit: usize,
+    visibility: Visibility,
 ) -> Result<Body, ApiError> {
     Root::query(
         client,
         &format!(
-        "https://www.pixiv.net/ajax/user/{}/illusts/bookmarks?tag=&offset={}&limit={}&rest=show",
-        user_id, offset, limit,
-    ),
+            "https://www.pixiv.net/ajax/user/{}/illusts/bookmarks?tag=&offset={}&limit={}&rest={}",
+            user_id,
+            offset,
+            limit,
+            visibility.to_rest()
+        ),
     )
     .await
+}
+
+#[derive(Copy, Clone)]
+pub enum Visibility {
+    Public,
+    Private,
+}
+
+impl Visibility {
+    const fn to_rest(self) -> &'static str {
+        match self {
+            Visibility::Public => "show",
+            Visibility::Private => "hide",
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
